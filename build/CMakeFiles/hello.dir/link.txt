@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/hello.dir/link.d CMakeFiles/hello.dir/src/hello.cpp.o CMakeFiles/hello.dir/src/ir/text_parser.cpp.o CMakeFiles/hello.dir/src/interpreter/interpreter.cpp.o -o hello

@@ -1,3 +1,0 @@
-/home/trex/Documents/Lithon/build/CMakeFiles/hello.dir
-/home/trex/Documents/Lithon/build/CMakeFiles/edit_cache.dir
-/home/trex/Documents/Lithon/build/CMakeFiles/rebuild_cache.dir
