@@ -148,6 +148,32 @@ Module parse_ir_text(const std::string& text) {
             for (size_t i = 1; i < oa.raw_args.size(); ++i) {
                 instr.args.push_back(parse_value_ref(oa.raw_args[i]));
             }
+        }} else if (oa.op_name == "const_bool") {
+            instr.op = Op::ConstBool;
+            instr.int_imm = std::stoll(oa.raw_args.at(0));
+        } else if (oa.op_name == "lt") {
+            instr.op = Op::Lt;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
+        } else if (oa.op_name == "gt") {
+            instr.op = Op::Gt;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
+        } else if (oa.op_name == "eq") {
+            instr.op = Op::Eq;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
+        } else if (oa.op_name == "and") {
+            instr.op = Op::And;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
+        } else if (oa.op_name == "or") {
+            instr.op = Op::Or;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
+        } else if (oa.op_name == "not") {
+            instr.op = Op::Not;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
         } else if (oa.op_name == "return") {
             instr.op = Op::Return;
         } else {

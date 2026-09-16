@@ -5,9 +5,10 @@ Lithon frontend, first slice: Python source -> Lithon IR text.
 Uses Python's own `ast` module as a shortcut -- not a permanent
 architecture choice, replaced by a native Lithon parser at M10.
 
-Scope of this slice, deliberately narrow: top-level statements only,
-treated as the body of an implicit `main` function in one basic
-block. Supports: assignment, int/float literals, +/-/*//, print().
+Scope of this slice: top-level statements only, treated as the body
+of an implicit `main` function in one basic block. Supports:
+assignment, int/float/bool literals, +/-/*//, comparisons (single,
+non-chained), and/or (exactly two operands), not, print().
 No control flow, no functions, no annotations yet.
 """
 import ast
@@ -28,9 +29,11 @@ class IRBuilder:
         self.lines.append(f"    {line}")
 
     def build_expr(self, node):
+        # bool is a subclass of int in Python -- must check before int.
         if isinstance(node, ast.Constant) and isinstance(node.value, bool):
-            # bool is a subclass of int in Python -- must check before int.
-            raise NotImplementedError("bool literals not supported yet")
+            r = self.new_reg()
+            self.emit(f"{r} = const_bool {1 if node.value else 0}")
+            return r
 
         if isinstance(node, ast.Constant) and isinstance(node.value, float):
             r = self.new_reg()
@@ -56,6 +59,35 @@ class IRBuilder:
                 raise NotImplementedError(f"operator {op_type.__name__} not supported yet")
             r = self.new_reg()
             self.emit(f"{r} = {op_map[op_type]} {left}, {right}")
+            return r
+
+        if isinstance(node, ast.Compare):
+            if len(node.ops) != 1 or len(node.comparators) != 1:
+                raise NotImplementedError("chained comparisons (a < b < c) not supported yet")
+            left = self.build_expr(node.left)
+            right = self.build_expr(node.comparators[0])
+            op_map = {ast.Lt: "lt", ast.Gt: "gt", ast.Eq: "eq"}
+            op_type = type(node.ops[0])
+            if op_type not in op_map:
+                raise NotImplementedError(f"comparison {op_type.__name__} not supported yet")
+            r = self.new_reg()
+            self.emit(f"{r} = {op_map[op_type]} {left}, {right}")
+            return r
+
+        if isinstance(node, ast.BoolOp):
+            if len(node.values) != 2:
+                raise NotImplementedError("and/or with exactly two operands supported for now")
+            left = self.build_expr(node.values[0])
+            right = self.build_expr(node.values[1])
+            op_name = "and" if isinstance(node.op, ast.And) else "or"
+            r = self.new_reg()
+            self.emit(f"{r} = {op_name} {left}, {right}")
+            return r
+
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            operand = self.build_expr(node.operand)
+            r = self.new_reg()
+            self.emit(f"{r} = not {operand}")
             return r
 
         raise NotImplementedError(f"expression node {type(node).__name__} not supported yet")

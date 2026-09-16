@@ -34,8 +34,6 @@ public:
     }
 };
 
-// Per V1_SPEC 0.2: int+float and float+int promote to float.
-// int/int is true division -> float. int+int/-/* stay int.
 LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
     bool either_float = lhs.is_float() || rhs.is_float();
 
@@ -75,8 +73,40 @@ LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
     }
 }
 
+// Comparisons: numeric only in this slice, int/float mix allowed
+// (promoted to double for the comparison), matching 0.2's "mixed
+// numeric -> bool" rule.
+LithonValue apply_compare(Op op, LithonValue lhs, LithonValue rhs) {
+    if ((!lhs.is_int() && !lhs.is_float()) || (!rhs.is_int() && !rhs.is_float())) {
+        throw std::runtime_error("interpreter: comparison on a non-numeric value");
+    }
+    double a = lhs.is_float() ? lhs.as_float() : static_cast<double>(lhs.as_int());
+    double b = rhs.is_float() ? rhs.as_float() : static_cast<double>(rhs.as_int());
+    switch (op) {
+        case Op::Lt: return LithonValue::make_bool(a < b);
+        case Op::Gt: return LithonValue::make_bool(a > b);
+        case Op::Eq: return LithonValue::make_bool(a == b);
+        default:
+            throw std::runtime_error("interpreter: not a comparison op");
+    }
+}
+
+LithonValue apply_boolop(Op op, LithonValue lhs, LithonValue rhs) {
+    // Per V1_SPEC 0.2 truthiness: False, 0, 0.0, None are false.
+    // and/or here follow Python's short-circuit VALUE semantics
+    // (return one of the operands, not necessarily a bool) --
+    // matches "0 and 1" -> 0, "1 or 0" -> 1 in boolean.py.
+    switch (op) {
+        case Op::And: return lhs.is_truthy() ? rhs : lhs;
+        case Op::Or:  return lhs.is_truthy() ? lhs : rhs;
+        default:
+            throw std::runtime_error("interpreter: not a bool op");
+    }
+}
+
 void do_print(LithonValue v) {
-    if (v.is_int())   std::cout << v.as_int() << "\n";
+    if (v.is_bool())        std::cout << (v.as_bool() ? "True" : "False") << "\n";
+    else if (v.is_int())    std::cout << v.as_int() << "\n";
     else if (v.is_float()) {
         double f = v.as_float();
         if (f == static_cast<int64_t>(f)) {
@@ -85,7 +115,6 @@ void do_print(LithonValue v) {
             std::cout << f << "\n";
         }
     }
-    else if (v.is_bool())   std::cout << (v.as_bool() ? "True" : "False") << "\n";
     else throw std::runtime_error("interpreter: print() of an unsupported value kind in this slice");
 }
 
@@ -115,6 +144,9 @@ void run_main(const Module& module) {
                 case Op::ConstFloat:
                     frame.regs[instr.result] = LithonValue::make_float(instr.float_imm);
                     break;
+                case Op::ConstBool:
+                    frame.regs[instr.result] = LithonValue::make_bool(instr.int_imm != 0);
+                    break;
                 case Op::Load:
                     frame.regs[instr.result] = frame.get_var(instr.name);
                     break;
@@ -128,6 +160,22 @@ void run_main(const Module& module) {
                     frame.regs[instr.result] = apply_binop(
                         instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
                     break;
+                case Op::Lt:
+                case Op::Gt:
+                case Op::Eq:
+                    frame.regs[instr.result] = apply_compare(
+                        instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
+                    break;
+                case Op::And:
+                case Op::Or:
+                    frame.regs[instr.result] = apply_boolop(
+                        instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
+                    break;
+                case Op::Not: {
+                    LithonValue v = frame.get_reg(instr.args.at(0));
+                    frame.regs[instr.result] = LithonValue::make_bool(!v.is_truthy());
+                    break;
+                }
                 case Op::Call:
                     if (instr.name == "print") {
                         do_print(frame.get_reg(instr.args.at(0)));
