@@ -1,0 +1,21 @@
+function main:
+block0:
+    %0 = const_i64 10
+    store x, %0
+    %1 = const_i64 20
+    store y, %1
+    %2 = load x
+    %3 = load y
+    %4 = add %2, %3
+    store z, %4
+    %5 = load z
+    call print, %5
+    %6 = load x
+    %7 = load y
+    %8 = sub %6, %7
+    call print, %8
+    %9 = load x
+    %10 = load y
+    %11 = mul %9, %10
+    call print, %11
+    return
