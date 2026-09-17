@@ -1,0 +1,43 @@
+function main:
+block0:
+    %0 = const_i64 0
+    store total, %0
+    %1 = const_i64 5
+    %2 = const_i64 0
+    store i, %2
+    jump block1
+block1:
+    %3 = load i
+    %4 = lt %3, %1
+    branch %4, block2, block3
+block2:
+    %5 = const_i64 5
+    %6 = const_i64 0
+    store j, %6
+    jump block4
+block4:
+    %7 = load j
+    %8 = lt %7, %5
+    branch %8, block5, block6
+block5:
+    %9 = load total
+    %10 = load i
+    %11 = load j
+    %12 = mul %10, %11
+    %13 = add %9, %12
+    store total, %13
+    %14 = load j
+    %15 = const_i64 1
+    %16 = add %14, %15
+    store j, %16
+    jump block4
+block6:
+    %17 = load i
+    %18 = const_i64 1
+    %19 = add %17, %18
+    store i, %19
+    jump block1
+block3:
+    %20 = load total
+    call print, %20
+    return

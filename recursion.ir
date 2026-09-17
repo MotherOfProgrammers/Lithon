@@ -1,0 +1,29 @@
+function fib(n):
+block0:
+    %0 = load n
+    %1 = const_i64 2
+    %2 = lt %0, %1
+    branch %2, block1, block2
+block1:
+    %3 = load n
+    return %3
+    jump block2
+block2:
+    %4 = load n
+    %5 = const_i64 1
+    %6 = sub %4, %5
+    %7 = call fib, %6
+    %8 = load n
+    %9 = const_i64 2
+    %10 = sub %8, %9
+    %11 = call fib, %10
+    %12 = add %7, %11
+    return %12
+    return
+
+function main():
+block0:
+    %0 = const_i64 10
+    %1 = call fib, %0
+    call print, %1
+    return

@@ -73,9 +73,6 @@ LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
     }
 }
 
-// Comparisons: numeric only in this slice, int/float mix allowed
-// (promoted to double for the comparison), matching 0.2's "mixed
-// numeric -> bool" rule.
 LithonValue apply_compare(Op op, LithonValue lhs, LithonValue rhs) {
     if ((!lhs.is_int() && !lhs.is_float()) || (!rhs.is_int() && !rhs.is_float())) {
         throw std::runtime_error("interpreter: comparison on a non-numeric value");
@@ -92,10 +89,6 @@ LithonValue apply_compare(Op op, LithonValue lhs, LithonValue rhs) {
 }
 
 LithonValue apply_boolop(Op op, LithonValue lhs, LithonValue rhs) {
-    // Per V1_SPEC 0.2 truthiness: False, 0, 0.0, None are false.
-    // and/or here follow Python's short-circuit VALUE semantics
-    // (return one of the operands, not necessarily a bool) --
-    // matches "0 and 1" -> 0, "1 or 0" -> 1 in boolean.py.
     switch (op) {
         case Op::And: return lhs.is_truthy() ? rhs : lhs;
         case Op::Or:  return lhs.is_truthy() ? lhs : rhs;
@@ -125,18 +118,47 @@ const Function* find_function(const Module& module, const std::string& name) {
     return nullptr;
 }
 
-} // namespace
+std::pair<std::string, std::string> split_branch_targets(const std::string& s) {
+    size_t comma = s.find(',');
+    if (comma == std::string::npos) {
+        throw std::runtime_error("interpreter: malformed branch targets: " + s);
+    }
+    return {s.substr(0, comma), s.substr(comma + 1)};
+}
 
-void run_main(const Module& module) {
-    const Function* main_fn = find_function(module, "main");
-    if (!main_fn) {
-        throw std::runtime_error("interpreter: no 'main' function in module");
+// Executes one function call: builds a fresh Frame, binds arg_values to
+// fn.params, walks blocks until Return, and returns the result. Calls
+// to user-defined functions recurse into this same routine -- each
+// recursive call gets its own Frame on the real C++ call stack, which
+// is what makes recursion (fib.py etc.) work correctly with isolated
+// locals per call, with no extra machinery needed.
+LithonValue execute_function(const Module& module, const Function& fn,
+                              const std::vector<LithonValue>& arg_values) {
+    if (arg_values.size() != fn.params.size()) {
+        throw std::runtime_error("interpreter: argument count mismatch calling '" + fn.name + "'");
+    }
+    if (fn.blocks.empty()) {
+        throw std::runtime_error("interpreter: function '" + fn.name + "' has no blocks");
     }
 
     Frame frame;
+    for (size_t i = 0; i < fn.params.size(); ++i) {
+        frame.vars[fn.params[i]] = arg_values[i];
+    }
 
-    for (const auto& block : main_fn->blocks) {
-        for (const auto& instr : block.instrs) {
+    std::unordered_map<std::string, const BasicBlock*> label_to_block;
+    for (const auto& block : fn.blocks) {
+        label_to_block[block.label] = &block;
+    }
+
+    LithonValue return_value = LithonValue::make_none();
+    const BasicBlock* cur = &fn.blocks.front();
+
+    while (true) {
+        bool jumped = false;
+        bool returned = false;
+
+        for (const auto& instr : cur->instrs) {
             switch (instr.op) {
                 case Op::ConstInt:
                     frame.regs[instr.result] = LithonValue::make_int(instr.int_imm);
@@ -176,20 +198,71 @@ void run_main(const Module& module) {
                     frame.regs[instr.result] = LithonValue::make_bool(!v.is_truthy());
                     break;
                 }
-                case Op::Call:
+                case Op::Call: {
                     if (instr.name == "print") {
                         do_print(frame.get_reg(instr.args.at(0)));
-                    } else {
+                        break;
+                    }
+                    const Function* callee = find_function(module, instr.name);
+                    if (!callee) {
                         throw std::runtime_error("interpreter: unknown call target '" + instr.name + "'");
                     }
+                    std::vector<LithonValue> args;
+                    for (ValueId id : instr.args) {
+                        args.push_back(frame.get_reg(id));
+                    }
+                    LithonValue result = execute_function(module, *callee, args);
+                    if (instr.result != kInvalidValue) {
+                        frame.regs[instr.result] = result;
+                    }
                     break;
+                }
+                case Op::Branch: {
+                    LithonValue cond = frame.get_reg(instr.args.at(0));
+                    auto [then_label, else_label] = split_branch_targets(instr.name);
+                    const std::string& target = cond.is_truthy() ? then_label : else_label;
+                    auto it = label_to_block.find(target);
+                    if (it == label_to_block.end()) {
+                        throw std::runtime_error("interpreter: branch to unknown block '" + target + "'");
+                    }
+                    cur = it->second;
+                    jumped = true;
+                    break;
+                }
+                case Op::Jump: {
+                    auto it = label_to_block.find(instr.name);
+                    if (it == label_to_block.end()) {
+                        throw std::runtime_error("interpreter: jump to unknown block '" + instr.name + "'");
+                    }
+                    cur = it->second;
+                    jumped = true;
+                    break;
+                }
                 case Op::Return:
-                    return;
+                    if (!instr.args.empty()) {
+                        return_value = frame.get_reg(instr.args.at(0));
+                    }
+                    returned = true;
+                    break;
                 default:
                     throw std::runtime_error("interpreter: opcode not yet implemented in this slice");
             }
+            if (jumped || returned) break;
         }
+
+        if (returned) return return_value;
+        if (!jumped) return return_value; // fell off the end -- safety net
     }
+}
+
+} // namespace
+
+void run_main(const Module& module) {
+    const Function* main_fn = find_function(module, "main");
+    if (!main_fn) {
+        throw std::runtime_error("interpreter: no 'main' function in module");
+    }
+    execute_function(module, *main_fn, {});
 }
 
 } // namespace lithon::interp

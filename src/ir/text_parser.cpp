@@ -30,7 +30,6 @@ bool starts_with(const std::string& s, const std::string& prefix) {
     return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
-// Parses "%N" -> N. Throws if malformed.
 ValueId parse_value_ref(const std::string& tok) {
     if (tok.empty() || tok[0] != '%') {
         throw std::runtime_error("expected value reference starting with '%', got: " + tok);
@@ -38,8 +37,6 @@ ValueId parse_value_ref(const std::string& tok) {
     return static_cast<ValueId>(std::stoul(tok.substr(1)));
 }
 
-// An instruction line's right-hand side is "OPNAME arg1, arg2, ..."
-// (arg list may be empty, e.g. bare "return").
 struct OpAndArgs {
     std::string op_name;
     std::vector<std::string> raw_args;
@@ -75,15 +72,27 @@ Module parse_ir_text(const std::string& text) {
         if (line.empty()) continue;
 
         if (starts_with(line, "function ")) {
-            std::string name = line.substr(std::string("function ").size());
-            if (!name.empty() && name.back() == ':') name.pop_back();
-            module.functions.push_back(Function{name, {}, {}});
+            std::string rest = line.substr(std::string("function ").size());
+            if (!rest.empty() && rest.back() == ':') rest.pop_back();
+
+            size_t paren_open = rest.find('(');
+            size_t paren_close = rest.find(')');
+            std::string name = rest.substr(0, paren_open);
+            std::vector<std::string> params;
+            if (paren_open != std::string::npos && paren_close != std::string::npos) {
+                std::string param_str = rest.substr(paren_open + 1, paren_close - paren_open - 1);
+                param_str = trim(param_str);
+                if (!param_str.empty()) {
+                    params = split(param_str, ',');
+                }
+            }
+
+            module.functions.push_back(Function{name, params, {}});
             current_fn = &module.functions.back();
             current_block = nullptr;
             continue;
         }
 
-        // Block label: a bare identifier ending in ':' with no '='.
         if (line.back() == ':' && line.find('=') == std::string::npos) {
             if (!current_fn) {
                 throw std::runtime_error("block label outside of any function: " + line);
@@ -119,6 +128,9 @@ Module parse_ir_text(const std::string& text) {
         } else if (oa.op_name == "const_f64") {
             instr.op = Op::ConstFloat;
             instr.float_imm = std::stod(oa.raw_args.at(0));
+        } else if (oa.op_name == "const_bool") {
+            instr.op = Op::ConstBool;
+            instr.int_imm = std::stoll(oa.raw_args.at(0));
         } else if (oa.op_name == "load") {
             instr.op = Op::Load;
             instr.name = oa.raw_args.at(0);
@@ -142,15 +154,6 @@ Module parse_ir_text(const std::string& text) {
             instr.op = Op::Div;
             instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
             instr.args.push_back(parse_value_ref(oa.raw_args.at(1)));
-        } else if (oa.op_name == "call") {
-            instr.op = Op::Call;
-            instr.name = oa.raw_args.at(0);
-            for (size_t i = 1; i < oa.raw_args.size(); ++i) {
-                instr.args.push_back(parse_value_ref(oa.raw_args[i]));
-            }
-        }} else if (oa.op_name == "const_bool") {
-            instr.op = Op::ConstBool;
-            instr.int_imm = std::stoll(oa.raw_args.at(0));
         } else if (oa.op_name == "lt") {
             instr.op = Op::Lt;
             instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
@@ -174,8 +177,24 @@ Module parse_ir_text(const std::string& text) {
         } else if (oa.op_name == "not") {
             instr.op = Op::Not;
             instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+        } else if (oa.op_name == "branch") {
+            instr.op = Op::Branch;
+            instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            instr.name = oa.raw_args.at(1) + "," + oa.raw_args.at(2);
+        } else if (oa.op_name == "jump") {
+            instr.op = Op::Jump;
+            instr.name = oa.raw_args.at(0);
+        } else if (oa.op_name == "call") {
+            instr.op = Op::Call;
+            instr.name = oa.raw_args.at(0);
+            for (size_t i = 1; i < oa.raw_args.size(); ++i) {
+                instr.args.push_back(parse_value_ref(oa.raw_args[i]));
+            }
         } else if (oa.op_name == "return") {
             instr.op = Op::Return;
+            if (!oa.raw_args.empty()) {
+                instr.args.push_back(parse_value_ref(oa.raw_args.at(0)));
+            }
         } else {
             throw std::runtime_error("unrecognized IR opcode: " + oa.op_name);
         }
