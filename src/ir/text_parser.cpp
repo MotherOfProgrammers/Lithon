@@ -37,6 +37,23 @@ ValueId parse_value_ref(const std::string& tok) {
     return static_cast<ValueId>(std::stoul(tok.substr(1)));
 }
 
+// Parses a type string like "int[8]", "float[32]", or "bool" into
+// (kind, width). width is -1 for bool or if no [N] is present.
+std::pair<std::string, int> parse_type_string(const std::string& raw) {
+    std::string t = trim(raw);
+    size_t bracket = t.find('[');
+    if (bracket == std::string::npos) {
+        return {t, -1};
+    }
+    std::string kind = t.substr(0, bracket);
+    size_t close = t.find(']', bracket);
+    if (close == std::string::npos) {
+        throw std::runtime_error("malformed type annotation: " + raw);
+    }
+    std::string width_str = t.substr(bracket + 1, close - bracket - 1);
+    return {kind, std::stoi(width_str)};
+}
+
 struct OpAndArgs {
     std::string op_name;
     std::vector<std::string> raw_args;
@@ -57,6 +74,25 @@ OpAndArgs split_op_and_args(const std::string& rhs) {
     return result;
 }
 
+// Splits "name" (untyped) or "name:Type[N]" (typed) function-header
+// parameter into (name, kind, width). kind is "" if untyped.
+struct ParamSpec {
+    std::string name;
+    std::string kind;
+    int width = -1;
+};
+
+ParamSpec parse_param(const std::string& raw) {
+    std::string p = trim(raw);
+    size_t colon = p.find(':');
+    if (colon == std::string::npos) {
+        return ParamSpec{p, "", -1};
+    }
+    std::string name = trim(p.substr(0, colon));
+    auto [kind, width] = parse_type_string(p.substr(colon + 1));
+    return ParamSpec{name, kind, width};
+}
+
 } // namespace
 
 Module parse_ir_text(const std::string& text) {
@@ -75,19 +111,45 @@ Module parse_ir_text(const std::string& text) {
             std::string rest = line.substr(std::string("function ").size());
             if (!rest.empty() && rest.back() == ':') rest.pop_back();
 
+            // Optional " -> ReturnType" before the (now-removed) trailing ':'
+            std::string return_kind;
+            int return_width = -1;
+            size_t arrow = rest.find("->");
+            if (arrow != std::string::npos) {
+                std::string ret_str = trim(rest.substr(arrow + 2));
+                auto [k, w] = parse_type_string(ret_str);
+                return_kind = k;
+                return_width = w;
+                rest = trim(rest.substr(0, arrow));
+            }
+
             size_t paren_open = rest.find('(');
             size_t paren_close = rest.find(')');
             std::string name = rest.substr(0, paren_open);
             std::vector<std::string> params;
+            std::vector<std::string> param_kinds;
+            std::vector<int> param_widths;
+
             if (paren_open != std::string::npos && paren_close != std::string::npos) {
-                std::string param_str = rest.substr(paren_open + 1, paren_close - paren_open - 1);
-                param_str = trim(param_str);
+                std::string param_str = trim(rest.substr(paren_open + 1, paren_close - paren_open - 1));
                 if (!param_str.empty()) {
-                    params = split(param_str, ',');
+                    for (const auto& raw_param : split(param_str, ',')) {
+                        ParamSpec spec = parse_param(raw_param);
+                        params.push_back(spec.name);
+                        param_kinds.push_back(spec.kind);
+                        param_widths.push_back(spec.width);
+                    }
                 }
             }
 
-            module.functions.push_back(Function{name, params, {}});
+            Function fn;
+            fn.name = name;
+            fn.params = params;
+            fn.param_type_kinds = param_kinds;
+            fn.param_type_widths = param_widths;
+            fn.return_type_kind = return_kind;
+            fn.return_type_width = return_width;
+            module.functions.push_back(fn);
             current_fn = &module.functions.back();
             current_block = nullptr;
             continue;
@@ -118,6 +180,17 @@ Module parse_ir_text(const std::string& text) {
             rhs = trim(line.substr(eq_pos + 1));
         } else {
             rhs = line;
+        }
+
+        // Optional trailing " : Type[N]" type suffix (currently only
+        // emitted on typed `store` instructions).
+        size_t type_sep = rhs.find(" : ");
+        if (type_sep != std::string::npos) {
+            std::string type_str = trim(rhs.substr(type_sep + 3));
+            auto [kind, width] = parse_type_string(type_str);
+            instr.type_kind = kind;
+            instr.type_width = width;
+            rhs = trim(rhs.substr(0, type_sep));
         }
 
         OpAndArgs oa = split_op_and_args(rhs);

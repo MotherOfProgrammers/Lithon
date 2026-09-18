@@ -1,21 +1,40 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 #include "runtime/value.h"
 #include "ir/ir.h"
 #include "ir/text_parser.h"
 #include "interpreter/interpreter.h"
+#include "typecheck/typecheck.h"
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: hello <ir_file>\n";
+    if (argc < 2) {
+        std::cerr << "usage: hello [--typecheck] <ir_file>\n";
         return 1;
     }
 
-    std::ifstream file(argv[1]);
+    bool do_typecheck = false;
+    std::string ir_path;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--typecheck") {
+            do_typecheck = true;
+        } else {
+            ir_path = arg;
+        }
+    }
+
+    if (ir_path.empty()) {
+        std::cerr << "usage: hello [--typecheck] <ir_file>\n";
+        return 1;
+    }
+
+    std::ifstream file(ir_path);
     if (!file) {
-        std::cerr << "error: cannot open " << argv[1] << "\n";
+        std::cerr << "error: cannot open " << ir_path << "\n";
         return 1;
     }
 
@@ -33,6 +52,18 @@ int main(int argc, char** argv) {
                 std::cout << "instrs in block0: "
                           << module.functions[0].blocks[0].instrs.size() << "\n";
             }
+        }
+
+        if (do_typecheck) {
+            std::cout << "--- type-checking ---\n";
+            auto errors = lithon::typecheck::check_module(module);
+            if (!errors.empty()) {
+                for (const auto& e : errors) {
+                    std::cerr << "RCR error: " << e.message << "\n";
+                }
+                return 1;
+            }
+            std::cout << "type-check: OK\n";
         }
 
         std::cout << "--- running interpreter ---\n";

@@ -45,13 +45,14 @@ constexpr ValueId kInvalidValue = 0xFFFFFFFF;
 
 struct Instr {
     Op op;
-    ValueId result;              // kInvalidValue if the instr has no result
-    std::vector<ValueId> args;   // operand value ids
+    ValueId result;
+    std::vector<ValueId> args;
 
-    // Payload for leaf/const instructions and named refs (Load/Store/Call target).
     int64_t int_imm = 0;
     double float_imm = 0.0;
     std::string name;
+    std::string type_kind;   // "int" | "float" | "str" | "bool" | "" (none)
+    int type_width = -1;      // bit width/byte capacity; -1 for bool or "none"
 };
 
 struct BasicBlock {
@@ -61,7 +62,11 @@ struct BasicBlock {
 
 struct Function {
     std::string name;
-    std::vector<std::string> params;   // positional args, per V1_SPEC
+    std::vector<std::string> params;
+    std::vector<std::string> param_type_kinds;   // parallel to params; "" if untyped
+    std::vector<int> param_type_widths;           // parallel to params; -1 if untyped/bool
+    std::string return_type_kind;                 // "" if untyped
+    int return_type_width = -1;
     std::vector<BasicBlock> blocks;
 };
 

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Lithon frontend, first slice: Python source -> Lithon IR text.
+Lithon frontend: Python source -> Lithon IR text.
 
 Uses Python's own `ast` module as a shortcut -- not a permanent
 architecture choice, replaced by a native Lithon parser at M10.
 
-Scope: multiple functions (only top-level `def`, no nesting).
-Supports: assignment, int/float/bool literals, +/-/*//, comparisons
-(single, non-chained), and/or (exactly two operands), not, print(),
-if/elif/else, while, for ... in range(...), function calls, return.
-No annotations yet.
+Two modes, both supported by the same builder:
+  - Untyped input (bare "x = 10", no annotations): emits IR exactly
+    as before, with no type fields. Existing tests/programs/*.py
+    (the M1/M2 regression suite) use this path unchanged.
+  - Typed input (AnnAssign "x: int[8] = 10", typed function
+    signatures): emits IR carrying type_kind/type_width per V1_SPEC
+    0.6, consumed by the type-checker before interpretation.
+
+Supports: assignment (typed and untyped), int/float/bool literals,
++/-/*//, comparisons (single, non-chained), and/or (exactly two
+operands), not, print(), if/elif/else, while, for ... in range(...),
+function calls, return.
 """
 import ast
 import sys
@@ -19,6 +26,38 @@ class Block:
     def __init__(self, label):
         self.label = label
         self.lines = []
+
+
+def render_type_suffix(kind, width):
+    if not kind:
+        return ""
+    if width is None or width == -1:
+        return f" : {kind}"
+    return f" : {kind}[{width}]"
+
+
+def parse_type_annotation(node):
+    """Returns (kind, width) from an annotation AST node, or raises
+    NotImplementedError for forms this frontend slice doesn't handle.
+    Mirrors tools/typecheck.py's parse_annotation, kept independent
+    since this is a separate scaffolding tool (frontend vs checker)."""
+    if isinstance(node, ast.Name):
+        if node.id == "bool":
+            return "bool", -1
+        raise NotImplementedError(f"type '{node.id}' requires an explicit size, e.g. {node.id}[64]")
+
+    if isinstance(node, ast.Subscript):
+        if not isinstance(node.value, ast.Name):
+            raise NotImplementedError("unsupported type annotation form")
+        base = node.value.id
+        if base not in ("int", "float", "str"):
+            raise NotImplementedError(f"unknown type '{base}'")
+        size_node = node.slice
+        if not isinstance(size_node, ast.Constant) or not isinstance(size_node.value, int):
+            raise NotImplementedError(f"{base}[N] requires a literal integer size")
+        return base, size_node.value
+
+    raise NotImplementedError("unsupported type annotation form")
 
 
 class IRBuilder:
@@ -209,6 +248,20 @@ class IRBuilder:
         self.start_block(exit_label)
 
     def build_stmt(self, node):
+        if isinstance(node, ast.AnnAssign):
+            if not isinstance(node.target, ast.Name):
+                raise NotImplementedError("only simple name targets are supported for annotations")
+            name = node.target.id
+            kind, width = parse_type_annotation(node.annotation)
+            if node.value is not None:
+                value_reg = self.build_expr(node.value)
+                suffix = render_type_suffix(kind, width)
+                self.emit(f"store {name}, {value_reg}{suffix}")
+            # annotation-only (no value) emits nothing -- the checker
+            # tracks the type from the annotation itself; nothing to
+            # store at runtime until a real value is assigned.
+            return
+
         if isinstance(node, ast.Assign):
             if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
                 raise NotImplementedError("only single-name assignment targets are supported")
@@ -225,7 +278,6 @@ class IRBuilder:
                 arg_reg = self.build_expr(call.args[0])
                 self.emit(f"call print, {arg_reg}")
                 return
-            # generic function call used as a statement -- discard the result
             self.build_expr(call)
             return
 
@@ -251,8 +303,8 @@ class IRBuilder:
 
         raise NotImplementedError(f"statement node {type(node).__name__} not supported yet")
 
-    def render(self, name, params):
-        out = [f"function {name}({', '.join(params)}):"]
+    def render(self, header_line):
+        out = [header_line]
         for b in self.blocks:
             out.append(f"{b.label}:")
             out.extend(b.lines)
@@ -268,16 +320,32 @@ def build_program(tree):
         if isinstance(stmt, ast.FunctionDef):
             fb = IRBuilder()
             fb.start_block(fb.reserve_label())
+
+            param_strs = []
+            for arg in stmt.args.args:
+                if arg.annotation is not None:
+                    kind, width = parse_type_annotation(arg.annotation)
+                    suffix = render_type_suffix(kind, width).replace(" : ", ":")
+                    param_strs.append(f"{arg.arg}{suffix}")
+                else:
+                    param_strs.append(arg.arg)
+
+            return_suffix = ""
+            if stmt.returns is not None:
+                kind, width = parse_type_annotation(stmt.returns)
+                return_suffix = f" -> {kind}" + (f"[{width}]" if width not in (None, -1) else "")
+
+            header = f"function {stmt.name}({', '.join(param_strs)}){return_suffix}:"
+
             for s in stmt.body:
                 fb.build_stmt(s)
-            fb.emit("return")  # safety net if the source has no trailing return
-            params = [a.arg for a in stmt.args.args]
-            module_parts.append(fb.render(stmt.name, params))
+            fb.emit("return")
+            module_parts.append(fb.render(header))
         else:
             main_builder.build_stmt(stmt)
 
     main_builder.emit("return")
-    module_parts.append(main_builder.render("main", []))
+    module_parts.append(main_builder.render("function main():"))
 
     return "\n\n".join(module_parts) + "\n"
 
