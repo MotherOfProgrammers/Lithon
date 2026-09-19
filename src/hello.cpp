@@ -9,28 +9,40 @@
 #include "interpreter/interpreter.h"
 #include "typecheck/typecheck.h"
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "usage: hello [--typecheck] <ir_file>\n";
-        return 1;
-    }
+namespace {
 
-    bool do_typecheck = false;
-    std::string ir_path;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--typecheck") {
-            do_typecheck = true;
-        } else {
-            ir_path = arg;
+// Detects whether this module carries ANY type annotation at all --
+// if so, Lithon's mandatory typing discipline applies and the
+// type-checker runs automatically. A fully untyped module (no
+// annotations anywhere) is treated as the original, pre-0.6
+// execution-only path, unchanged -- this is what keeps the original
+// 11-program regression suite working without modification.
+bool module_has_any_typing(const lithon::ir::Module& module) {
+    for (const auto& fn : module.functions) {
+        if (!fn.return_type_kind.empty()) return true;
+        for (const auto& k : fn.param_type_kinds) {
+            if (!k.empty()) return true;
+        }
+        for (const auto& block : fn.blocks) {
+            for (const auto& instr : block.instrs) {
+                if (instr.op == lithon::ir::Op::Store && !instr.type_kind.empty()) {
+                    return true;
+                }
+            }
         }
     }
+    return false;
+}
 
-    if (ir_path.empty()) {
-        std::cerr << "usage: hello [--typecheck] <ir_file>\n";
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cerr << "usage: hello <ir_file>\n";
         return 1;
     }
+
+    std::string ir_path = argv[1];
 
     std::ifstream file(ir_path);
     if (!file) {
@@ -44,18 +56,7 @@ int main(int argc, char** argv) {
     try {
         lithon::ir::Module module = lithon::ir::parse_ir_text(buffer.str());
 
-        std::cout << "functions parsed: " << module.functions.size() << "\n";
-        if (!module.functions.empty()) {
-            std::cout << "function name: " << module.functions[0].name << "\n";
-            std::cout << "blocks in it: " << module.functions[0].blocks.size() << "\n";
-            if (!module.functions[0].blocks.empty()) {
-                std::cout << "instrs in block0: "
-                          << module.functions[0].blocks[0].instrs.size() << "\n";
-            }
-        }
-
-        if (do_typecheck) {
-            std::cout << "--- type-checking ---\n";
+        if (module_has_any_typing(module)) {
             auto errors = lithon::typecheck::check_module(module);
             if (!errors.empty()) {
                 for (const auto& e : errors) {
@@ -63,10 +64,8 @@ int main(int argc, char** argv) {
                 }
                 return 1;
             }
-            std::cout << "type-check: OK\n";
         }
 
-        std::cout << "--- running interpreter ---\n";
         lithon::interp::run_main(module);
 
     } catch (const std::exception& e) {

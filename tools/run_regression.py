@@ -8,6 +8,10 @@ Runs every tests/programs/*.py through:
 
 Fails loudly, and shows a diff, on any mismatch. Run this after any
 change to the frontend or interpreter -- it should stay green.
+
+These programs are untyped (no annotations), so hello's automatic
+type-detection skips the type-checker for them entirely and runs
+straight to interpretation, unchanged from the original M1/M2 path.
 """
 import pathlib
 import subprocess
@@ -43,15 +47,7 @@ def run_lithon(py_file: pathlib.Path) -> str:
     if run_result.returncode != 0:
         raise RuntimeError(f"interpreter failed on {py_file.name}:\n{run_result.stderr}")
 
-    # hello.cpp currently prints debug lines ("functions parsed: ...",
-    # "--- running interpreter ---") before the real program output.
-    # Strip everything up to and including that marker line.
-    lines = run_result.stdout.splitlines(keepends=True)
-    marker = "--- running interpreter ---\n"
-    if marker in lines:
-        idx = lines.index(marker)
-        lines = lines[idx + 1:]
-    return "".join(lines)
+    return run_result.stdout
 
 
 def main():

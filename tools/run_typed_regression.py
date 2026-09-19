@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
 Typed regression driver: runs each tests/typed_regression/*.py
-through the FULL real pipeline -- frontend.py -> lithon_interp
---typecheck -- and compares against expected/*.out (reused from the
-already-CPython-verified untyped originals, since these typed
-sources are semantically identical but not runnable by real CPython
-due to "int[64]" not being valid subscript syntax at runtime).
+through the FULL real pipeline -- frontend.py -> lithon (hello) --
+and compares against expected/*.out (reused from the already-
+CPython-verified untyped originals, since these typed sources are
+semantically identical but not runnable by real CPython due to
+"int[64]" not being valid subscript syntax at runtime).
+
+Since hello now auto-detects typing and runs the checker
+automatically, no --typecheck flag is needed -- these programs
+exercise the mandatory-typing path simply by containing annotations.
 """
 import pathlib
 import subprocess
@@ -31,7 +35,7 @@ def run_lithon_typed(py_file: pathlib.Path):
 
     try:
         run_result = subprocess.run(
-            [str(INTERP_BIN), "--typecheck", str(ir_path)],
+            [str(INTERP_BIN), str(ir_path)],
             capture_output=True, text=True
         )
     finally:
@@ -40,12 +44,7 @@ def run_lithon_typed(py_file: pathlib.Path):
     if run_result.returncode != 0:
         return None, f"typecheck/run failed (exit {run_result.returncode}):\n{run_result.stdout}{run_result.stderr}"
 
-    lines = run_result.stdout.splitlines(keepends=True)
-    marker = "--- running interpreter ---\n"
-    if marker in lines:
-        idx = lines.index(marker)
-        lines = lines[idx + 1:]
-    return "".join(lines), None
+    return run_result.stdout, None
 
 
 def main():
