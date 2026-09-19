@@ -1,6 +1,6 @@
 <div align="center">
 <h1 align="center">Lithon</h1>
-    <img src="assets/boa.png" alt="BOA" width="200" />
+    <img src="assets/boa.png" alt="BOA" width="400" />
 
 ### Give Python wings.
 
