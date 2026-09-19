@@ -33,8 +33,8 @@ jobs:
 
       - name: Execute JIT Native Machine Code Tests
         run: |
-          ./build/encoder_test
-          ./build/branch_test
+          ./encoder_test
+          ./branch_test
 
       - name: Run Untyped Regression Suite (11/11 PASS)
         run: python3 tools/run_regression.py
