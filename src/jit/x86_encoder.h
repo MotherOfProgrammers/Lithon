@@ -144,4 +144,80 @@ inline JumpPatch emit_jcc_rel32(CodeBuffer& buf, Cond cond) {
     return JumpPatch{rel32_offset, buf.size()};
 }
 
+// --- Stack-relative addressing, for spilled values and locals ---
+//
+// Deliberately always uses the disp32 ModRM form (mod=10) rather
+// than the shorter disp8 form (mod=01) that `as` prefers for small
+// offsets -- one uniform code path, correctness over a few wasted
+// bytes per instruction (V1_SPEC Rule 1). Verified against `as`
+// output for both a small offset (-8, where `as` itself would have
+// chosen disp8) and a large one (-200, where `as` also chose disp32)
+// -- the disp32 form is valid and correct for any offset magnitude.
+
+inline void emit_disp32_le(CodeBuffer& buf, int32_t disp) {
+    uint32_t bits = static_cast<uint32_t>(disp);
+    emit_u8(buf, static_cast<uint8_t>(bits & 0xFF));
+    emit_u8(buf, static_cast<uint8_t>((bits >> 8) & 0xFF));
+    emit_u8(buf, static_cast<uint8_t>((bits >> 16) & 0xFF));
+    emit_u8(buf, static_cast<uint8_t>((bits >> 24) & 0xFF));
+}
+
+// mov [rbp + offset], src   (store to a stack slot; offset is
+// typically negative, e.g. -8 for the first local below the frame)
+// Encoding: REX.W + 89 /r, ModRM(mod=10, reg=src, rm=RBP), disp32
+inline void emit_store_rbp_offset(CodeBuffer& buf, Reg src, int32_t offset) {
+    emit_u8(buf, 0x48);
+    emit_u8(buf, 0x89);
+    emit_u8(buf, static_cast<uint8_t>(0x80 | (static_cast<uint8_t>(src) << 3) | static_cast<uint8_t>(Reg::RBP)));
+    emit_disp32_le(buf, offset);
+}
+
+// mov dst, [rbp + offset]   (load from a stack slot)
+// Encoding: REX.W + 8B /r, ModRM(mod=10, reg=dst, rm=RBP), disp32
+inline void emit_load_rbp_offset(CodeBuffer& buf, Reg dst, int32_t offset) {
+    emit_u8(buf, 0x48);
+    emit_u8(buf, 0x8B);
+    emit_u8(buf, static_cast<uint8_t>(0x80 | (static_cast<uint8_t>(dst) << 3) | static_cast<uint8_t>(Reg::RBP)));
+    emit_disp32_le(buf, offset);
+}
+
+// push reg / pop reg. Encoding: 0x50+r / 0x58+r -- no REX.W needed,
+// push/pop default to 64-bit operand size in 64-bit mode.
+inline void emit_push_reg(CodeBuffer& buf, Reg reg) {
+    emit_u8(buf, static_cast<uint8_t>(0x50 + static_cast<uint8_t>(reg)));
+}
+
+inline void emit_pop_reg(CodeBuffer& buf, Reg reg) {
+    emit_u8(buf, static_cast<uint8_t>(0x58 + static_cast<uint8_t>(reg)));
+}
+
+// sub rsp, imm32 -- used to allocate stack frame space in the
+// prologue. Always uses the imm32 form (REX.W + 81 /5 id) rather
+// than the shorter imm8 form, for the same uniformity reason as the
+// disp32 addressing above.
+inline void emit_sub_rsp_imm32(CodeBuffer& buf, int32_t imm) {
+    emit_u8(buf, 0x48);
+    emit_u8(buf, 0x81);
+    emit_u8(buf, static_cast<uint8_t>(0xC0 | (5 << 3) | static_cast<uint8_t>(Reg::RSP)));
+    emit_disp32_le(buf, imm);
+}
+
+// Standard function prologue: push rbp, mov rbp, rsp, sub rsp, frame_size.
+// frame_size should be 16-byte aligned per the System V AMD64 ABI
+// once this is used for real calls into/out of other compiled code.
+inline void emit_prologue(CodeBuffer& buf, int32_t frame_size) {
+    emit_push_reg(buf, Reg::RBP);
+    emit_mov_reg_reg(buf, Reg::RBP, Reg::RSP);
+    if (frame_size > 0) {
+        emit_sub_rsp_imm32(buf, frame_size);
+    }
+}
+
+// Standard function epilogue: mov rsp, rbp, pop rbp. Caller still
+// needs to emit `ret` separately.
+inline void emit_epilogue(CodeBuffer& buf) {
+    emit_mov_reg_reg(buf, Reg::RSP, Reg::RBP);
+    emit_pop_reg(buf, Reg::RBP);
+}
+
 } // namespace lithon::jit
