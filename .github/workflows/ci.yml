@@ -1,0 +1,43 @@
+name: Lithon CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Ubuntu x86-64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Build Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake g++-12
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile C++ Engine & JIT Encoders
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Execute JIT Native Machine Code Tests
+        run: |
+          ./build/encoder_test
+          ./build/branch_test
+
+      - name: Run Untyped Regression Suite (11/11 PASS)
+        run: python3 tools/run_regression.py
+
+      - name: Run Typed Verification Suite (12/12 PASS)
+        run: python3 tools/run_typed_regression.py
