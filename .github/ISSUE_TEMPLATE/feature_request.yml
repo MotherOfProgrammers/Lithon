@@ -1,0 +1,19 @@
+name: Feature Request
+description: Propose new AST lowering passes, opcode encodings, or type bounds algebra.
+title: "[FEAT]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Target Use Case/Motivation
+      description: What compiler capacity or opcode support is missing?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Implementation Strategy
+      description: Describe how this feature should interact with typecheck.cpp or src/jit/.
+    validations:
+      required: true

@@ -1,0 +1,37 @@
+name: Bug Report
+description: Report an unexpected lowering error, verification failure, or JIT crash.
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for helping improve Lithon/Boa!
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal PEP 526 Code Example
+      description: Provide the smallest reproducible snippet that causes the failure.
+      placeholder: |
+        def foo(x: int) -> int:
+            return x + 1
+      render: python
+    validations:
+      required: true
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Affected Subsystem
+      options:
+        - Frontend/Parser (Python AST)
+        - Verifier (typecheck.cpp RCR Engine)
+        - IR Transformation (ir::Module)
+        - JIT Encoder (src/jit/ x86-64 emission)
+    validations:
+      required: true
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: Expected vs Actual Behavior
+      description: Explain what happened versus what you expected (include terminal output or exit codes).
+    validations:
+      required: true
