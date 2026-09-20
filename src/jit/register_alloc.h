@@ -1,5 +1,4 @@
 #pragma once
-
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -7,17 +6,6 @@
 #include "ir/ir.h"
 #include "liveness.h"
 #include "x86_encoder.h"
-
-// Register allocation for Lithon's v1 codegen, split into two
-// independent, deliberately simple mechanisms (see liveness.h's
-// design note for why this split is CORRECT, not a shortcut):
-//
-//   1. Named variables (locals/params) -- one fixed stack slot each,
-//      for the whole function. No liveness needed: this sidesteps
-//      the loop-carrying problem entirely, by construction.
-//   2. %N temporaries -- allocated to a small pool of scratch
-//      registers via linear scan over LivenessAnalysis, spilling to
-//      a stack slot when the pool is exhausted.
 
 namespace lithon::jit {
 

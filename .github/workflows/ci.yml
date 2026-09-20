@@ -58,3 +58,15 @@ jobs:
 
       - name: Run Typed Verification Suite (12/12 expected)
         run: python3 tools/run_typed_regression.py
+
+      - name: Compile Liveness & Register Allocation Tests
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Isrc -o liveness_test src/jit/liveness_test.cpp
+          g++ -std=c++20 -Wall -Wextra -Isrc -o regalloc_test src/jit/regalloc_test.cpp
+          g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_test src/jit/compile_function_test.cpp
+
+      - name: Execute Liveness & Register Allocation Tests
+        run: |
+          ./liveness_test
+          ./regalloc_test
+          ./compile_function_test

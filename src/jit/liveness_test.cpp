@@ -1,21 +1,3 @@
-// Verifies liveness computation against a hand-built IR shaped like
-// tests/typed_regression/while.py:
-//
-//   i = 0            (%0)
-//   total = 0        (%1)
-//   header: %2=load i, %3=const 10, %4=lt %2,%3, branch %4, body, exit
-//   body: %5=load total, %6=load i, %7=add %5,%6, store total,
-//         %8=load i, %9=const 1, %10=add %8,%9, store i, jump header
-//   exit: %11=load total, call print, return
-//
-// Confirms the CORRECT model for this IR: raw %N values are never
-// loop-carried at the value-id level (every Load produces a fresh
-// %N; loop-carrying happens through named Store/Load), so plain
-// non-loop-aware liveness is correct here -- an earlier attempt to
-// extend %N ranges across back-edges was solving a problem that
-// doesn't exist in this IR, and incorrectly broke loop-local values
-// like %2. This test locks in the correct expectations.
-
 #include "liveness.h"
 #include "ir/ir.h"
 #include <cstdio>
@@ -107,10 +89,6 @@ int main() {
 
     bool ok = true;
 
-    // %1 (total's init literal) is genuinely dead after its own
-    // Store -- it is NOT loop-carried at the value-id level, because
-    // "total" is carried via named Store/Load, and every Load
-    // produces a fresh %N. This is correct, not a gap.
     auto it1 = liveness.ranges().find(1);
     if (it1 == liveness.ranges().end()) {
         printf("FAIL: %%1 missing entirely\n");
@@ -123,9 +101,6 @@ int main() {
         printf("OK: %%1 correctly dead after its own store (last_use=3)\n");
     }
 
-    // %2 (load i inside the header, used only by the immediate Lt
-    // check) must stay LOCAL -- last_use=7, not extended across the
-    // loop. This is the exact case the earlier flawed design broke.
     auto it2 = liveness.ranges().find(2);
     if (it2 == liveness.ranges().end()) {
         printf("FAIL: %%2 missing\n");

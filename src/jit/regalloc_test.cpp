@@ -1,15 +1,3 @@
-// Verifies register allocation against a function shaped like
-// tests/typed_regression/function.py's add(a, b):
-//   %0 = load a
-//   %1 = load b
-//   %2 = add %0, %1
-//   return %2
-//
-// Confirms: a and b get distinct fixed stack slots, %0/%1/%2 each
-// get a register (pool of 4 is plenty for 3 short-lived temporaries
-// with no overlap forcing a spill), and frame_size is a sane,
-// 16-byte-aligned value.
-
 #include "register_alloc.h"
 #include "ir/ir.h"
 #include <cstdio>

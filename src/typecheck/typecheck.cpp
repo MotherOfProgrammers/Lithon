@@ -1,5 +1,4 @@
 #include "typecheck.h"
-
 #include <unordered_map>
 #include <unordered_set>
 #include <cstdint>
@@ -115,10 +114,6 @@ private:
         }
     }
 
-    // Detects the exact "i = i + 1" shape frontend.py's build_for
-    // always emits as a loop's increment step. Already guaranteed
-    // safe by the separate 0.6.12 range-fit check on the loop's
-    // bound, so it is exempt from the general provable-range check.
     std::unordered_set<const Instr*> find_loop_increment_stores() {
         std::unordered_set<const Instr*> exempt;
         for (const auto& block : fn_.blocks) {
@@ -258,12 +253,7 @@ private:
     void check_binop_fits_target(const Instr& binop_instr, const LType& target,
                                   const std::string& context) {
         if (target.kind != "int") return;
-        if (target.width >= 64) return; // 0.6.5's documented exception: int64 is the
-                                          // max width, so overflow here is a runtime
-                                          // trap, not a static rejection -- and there
-                                          // is no wider type to require anyway. This
-                                          // also avoids signed-overflow UB when
-                                          // combining two near-INT64_MAX ranges below.
+        if (target.width >= 64) return;
         if (binop_instr.op != Op::Add && binop_instr.op != Op::Sub && binop_instr.op != Op::Mul) return;
 
         int64_t lo1, hi1, lo2, hi2;

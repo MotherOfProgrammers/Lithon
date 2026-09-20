@@ -1,17 +1,3 @@
-// Proves stack-relative addressing and prologue/epilogue work
-// correctly together. Compiles, by hand:
-//
-//     int64_t sum3(int64_t a, int64_t b, int64_t c) {
-//         int64_t tmp = a + b;   // spilled to [rbp-8]
-//         return tmp + c;         // reloaded from [rbp-8]
-//     }
-//
-// deliberately spilling `tmp` to the stack (rather than keeping it
-// in a register) to exercise emit_store_rbp_offset /
-// emit_load_rbp_offset and the prologue/epilogue together -- this is
-// exactly the shape a real spilled value takes once the register
-// allocator runs out of physical registers.
-
 #include "x86_encoder.h"
 #include <sys/mman.h>
 #include <cstdio>
@@ -25,7 +11,6 @@ int main() {
     CodeBuffer code;
 
     // System V AMD64: a=rdi, b=rsi, c=rdx, return=rax.
-
     emit_prologue(code, 16);
 
     emit_mov_reg_reg(code, Reg::RAX, Reg::RDI);   // rax = a
