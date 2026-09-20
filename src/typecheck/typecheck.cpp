@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <cstdint>
 #include <algorithm>
+#include <limits>
 
 namespace lithon::typecheck {
 
@@ -21,6 +22,9 @@ struct LType {
 };
 
 std::pair<int64_t, int64_t> int_range(int width) {
+    if (width >= 64) {
+        return {std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()};
+    }
     int64_t half = int64_t(1) << (width - 1);
     return {-half, half - 1};
 }
