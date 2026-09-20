@@ -76,7 +76,7 @@ jobs:
           g++ -std=c++20 -Wall -Wextra -Isrc -o regalloc_test src/jit/regalloc_test.cpp
           g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_test src/jit/compile_function_test.cpp
           g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_branch_test src/jit/compile_function_branch_test.cpp
-                    g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_loop_test src/jit/compile_function_loop_test.cpp
+          g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_loop_test src/jit/compile_function_loop_test.cpp
 
       - name: Execute Liveness & Register Allocation Tests
         run: |
