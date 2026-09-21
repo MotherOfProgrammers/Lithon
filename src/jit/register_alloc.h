@@ -1,4 +1,5 @@
 #pragma once
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -7,6 +8,26 @@
 #include "liveness.h"
 #include "x86_encoder.h"
 
+// Register allocation for Lithon's v1 codegen, split into two
+// independent, deliberately simple mechanisms (see liveness.h's
+// design note for why this split is CORRECT, not a shortcut):
+//
+//   1. Named variables (locals/params) -- one fixed stack slot each,
+//      for the whole function.
+//   2. %N temporaries -- allocated to a small pool of scratch
+//      registers via linear scan, spilling to a stack slot when the
+//      pool is exhausted OR when the value's live range spans a
+//      Call instruction (see below).
+//
+// Register pool: RAX, RCX, RDX only (3 registers) for real
+// allocation. RBX is deliberately RESERVED, never assigned to a %N
+// value -- it is used purely as transient scratch space within a
+// single instruction's codegen when reading or writing a spilled
+// value (compile_function.h). This is necessary because RAX/RCX/RDX
+// are caller-saved per the System V ABI: any called function (or
+// anything IT calls) may clobber them, so a temporary whose live
+// range spans a Call must never live in one of them -- it is forced
+// to a stack slot instead, which survives any call.
 namespace lithon::jit {
 
 struct ValueLocation {
@@ -20,6 +41,7 @@ public:
     explicit RegisterAllocator(const lithon::ir::Function& fn)
         : fn_(fn), liveness_(fn) {
         assign_variable_slots();
+        find_call_indices();
         assign_temporary_locations();
     }
 
@@ -51,6 +73,7 @@ private:
     std::unordered_map<std::string, int> variable_offsets_;
     std::vector<std::string> variable_order_;
     std::unordered_map<lithon::ir::ValueId, ValueLocation> temp_locations_;
+    std::vector<int> call_indices_;
     int next_slot_offset_ = 0;
     int frame_size_ = 0;
 
@@ -76,8 +99,37 @@ private:
         }
     }
 
+    // Flat instruction indices of every Call, using the SAME
+    // block-then-instruction counting scheme as liveness.h, so the
+    // indices line up with LiveRange.birth/last_use.
+    void find_call_indices() {
+        int idx = 0;
+        for (const auto& block : fn_.blocks) {
+            for (const auto& instr : block.instrs) {
+                if (instr.op == lithon::ir::Op::Call) {
+                    call_indices_.push_back(idx);
+                }
+                ++idx;
+            }
+        }
+    }
+
+    // True if [birth, last_use] genuinely SPANS a call -- defined
+    // strictly before it and used strictly after it. A value that IS
+    // the call's own result (birth == call_idx) or that is merely an
+    // ARGUMENT to the call (last_use == call_idx) is not spanning --
+    // both are safe in a caller-saved register.
+    bool spans_a_call(const LiveRange& range) const {
+        for (int call_idx : call_indices_) {
+            if (range.birth < call_idx && range.last_use > call_idx) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void assign_temporary_locations() {
-        const std::vector<Reg> pool = {Reg::RAX, Reg::RCX, Reg::RDX, Reg::RBX};
+        const std::vector<Reg> pool = {Reg::RAX, Reg::RCX, Reg::RDX};
 
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries(
             liveness_.ranges().begin(), liveness_.ranges().end());
@@ -103,7 +155,9 @@ private:
                     return false;
                 }), active.end());
 
-            if (!free_regs.empty()) {
+            bool must_spill = spans_a_call(range);
+
+            if (!must_spill && !free_regs.empty()) {
                 Reg r = *free_regs.begin();
                 free_regs.erase(free_regs.begin());
                 temp_locations_[id] = ValueLocation{true, r, -1};

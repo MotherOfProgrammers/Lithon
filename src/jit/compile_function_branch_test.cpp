@@ -2,10 +2,11 @@
 // together via the real compile_module bridge. Compiles a real
 // ir::Function equivalent to:
 //
-//     int64_t max(int64_t a, int64_t b) {
-//         if (a > b) return a;
-//         else return b;
-//     }
+//     def max(a:int[64], b:int[64]) -> int[64]:
+//         if (a > b):
+//              return a
+//         else:
+//              return b
 
 #include "compile_function.h"
 #include "ir/ir.h"
