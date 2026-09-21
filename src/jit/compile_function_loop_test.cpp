@@ -1,6 +1,5 @@
-// Proves the backward-jump path in compile_function's two-pass patch
-// resolution actually works -- max()/compile_function_branch_test.cpp
-// only exercised FORWARD jumps (if/else). This compiles a real loop:
+// Proves the backward-jump path in compile_module's two-pass patch
+// resolution actually works. Compiles a real loop:
 //
 //     def sum_to_n(n: int[64]) -> int[64]:
 //         total = 0
@@ -9,10 +8,6 @@
 //             total = total + i
 //             i = i + 1
 //         return total
-//
-// matching the exact header/body/exit block shape frontend.py's
-// build_while emits, including the backward "jump block1" at the
-// end of the body block -- the case nothing has tested until now.
 
 #include "compile_function.h"
 #include "ir/ir.h"
@@ -56,7 +51,7 @@ int main() {
     { Instr i; i.op = Op::ConstInt; i.result = 9; i.int_imm = 1; body.instrs.push_back(i); }
     { Instr i; i.op = Op::Add; i.result = 10; i.args = {8, 9}; body.instrs.push_back(i); }
     { Instr i; i.op = Op::Store; i.result = kInvalidValue; i.args = {10}; i.name = "i"; body.instrs.push_back(i); }
-    { Instr i; i.op = Op::Jump; i.result = kInvalidValue; i.name = "block1"; body.instrs.push_back(i); } // BACKWARD
+    { Instr i; i.op = Op::Jump; i.result = kInvalidValue; i.name = "block1"; body.instrs.push_back(i); }
 
     BasicBlock exit_block;
     exit_block.label = "block3";
@@ -65,24 +60,28 @@ int main() {
 
     fn.blocks = {entry, header, body, exit_block};
 
-    CodeBuffer code = compile_function(fn);
+    Module module;
+    module.functions = {fn};
+    CompiledModule compiled = compile_module(module);
 
-    std::printf("compiled %zu bytes:", code.size());
-    for (auto b : code) std::printf(" %02x", b);
+    std::printf("compiled %zu bytes:", compiled.code.size());
+    for (auto b : compiled.code) std::printf(" %02x", b);
     std::printf("\n");
 
-    void* mem = mmap(nullptr, code.size(), PROT_READ | PROT_WRITE,
+    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) { std::perror("mmap"); return 1; }
 
-    std::memcpy(mem, code.data(), code.size());
+    std::memcpy(mem, compiled.code.data(), compiled.code.size());
 
-    if (mprotect(mem, code.size(), PROT_READ | PROT_EXEC) != 0) {
+    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
         std::perror("mprotect");
         return 1;
     }
 
-    SumFunc compiled_sum = reinterpret_cast<SumFunc>(mem);
+    size_t sum_offset = compiled.function_offset.at("sum_to_n");
+    SumFunc compiled_sum = reinterpret_cast<SumFunc>(
+        reinterpret_cast<uint8_t*>(mem) + sum_offset);
 
     int64_t r1 = compiled_sum(5);
     int64_t r2 = compiled_sum(0);

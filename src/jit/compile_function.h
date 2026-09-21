@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -179,6 +181,45 @@ inline CodeBuffer compile_function(const lithon::ir::Function& fn) {
     }
 
     return code;
+}
+
+// Result of compiling a whole ir::Module into one contiguous code
+// image. function_offset maps each function's name to its starting
+// byte offset within `code`, so a caller can treat
+// (base + function_offset.at(name)) as that function's entry point.
+struct CompiledModule {
+    std::vector<uint8_t> code;
+    std::unordered_map<std::string, size_t> function_offset;
+};
+
+// Compiles every function in the module into a single shared buffer.
+// Each function is compiled independently by compile_function (its
+// jumps are self-contained relative patches, so concatenation cannot
+// break them), then appended at a 16-byte-aligned offset.
+//
+// NOTE: cross-function Call is NOT implemented yet -- compile_function
+// still rejects Op::Call with an explicit error, so modules containing
+// calls will throw rather than silently miscompile.
+inline CompiledModule compile_module(const lithon::ir::Module& module) {
+    CompiledModule out;
+
+    for (const auto& fn : module.functions) {
+        if (out.function_offset.count(fn.name)) {
+            throw std::runtime_error(
+                "compile_module: duplicate function name '" + fn.name + "'");
+        }
+
+        CodeBuffer fn_code = compile_function(fn);
+
+        while (out.code.size() % 16 != 0) {
+            out.code.push_back(0xCC); // int3 padding
+        }
+        out.function_offset[fn.name] = out.code.size();
+        out.code.insert(out.code.end(),
+                        fn_code.data(), fn_code.data() + fn_code.size());
+    }
+
+    return out;
 }
 
 } // namespace lithon::jit

@@ -1,3 +1,10 @@
+// The real, first end-to-end proof: compiles a typed ir::Function --
+// the exact shape of tests/typed_regression/function.py's
+// add(a: int[64], b: int[64]) -> int[64]: return a + b -- to genuine
+// x86-64 machine code via compile_module, executes it, and compares
+// against the known-correct result the interpreter already produces
+// for the same program (7 for add(3, 4)).
+
 #include "compile_function.h"
 #include "ir/ir.h"
 #include <sys/mman.h>
@@ -22,24 +29,28 @@ int main() {
     { Instr i; i.op = Op::Return; i.result = kInvalidValue; i.args = {2}; block0.instrs.push_back(i); }
     fn.blocks = {block0};
 
-    CodeBuffer code = compile_function(fn);
+    Module module;
+    module.functions = {fn};
+    CompiledModule compiled = compile_module(module);
 
-    std::printf("compiled %zu bytes:", code.size());
-    for (auto b : code) std::printf(" %02x", b);
+    std::printf("compiled %zu bytes:", compiled.code.size());
+    for (auto b : compiled.code) std::printf(" %02x", b);
     std::printf("\n");
 
-    void* mem = mmap(nullptr, code.size(), PROT_READ | PROT_WRITE,
+    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) { std::perror("mmap"); return 1; }
 
-    std::memcpy(mem, code.data(), code.size());
+    std::memcpy(mem, compiled.code.data(), compiled.code.size());
 
-    if (mprotect(mem, code.size(), PROT_READ | PROT_EXEC) != 0) {
+    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
         std::perror("mprotect");
         return 1;
     }
 
-    AddFunc compiled_add = reinterpret_cast<AddFunc>(mem);
+    size_t add_offset = compiled.function_offset.at("add");
+    AddFunc compiled_add = reinterpret_cast<AddFunc>(
+        reinterpret_cast<uint8_t*>(mem) + add_offset);
 
     int64_t r1 = compiled_add(3, 4);
     int64_t r2 = compiled_add(100, 200);
