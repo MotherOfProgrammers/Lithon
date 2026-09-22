@@ -1,0 +1,8 @@
+{
+  "benchmark": "fib(30)",
+  "native_ms": 14.6568,
+  "reference_ms": 3855.3177,
+  "speedup": 263.0,
+  "result": 832040,
+  "status": "PASS"
+}

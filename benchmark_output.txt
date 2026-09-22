@@ -1,0 +1,6 @@
+(interpreter output for fib(30): 832040
+
+--- fib(30) benchmark ---
+native compiled : 14.6568 ms  (result=832040)
+interpreter     : 3855.3177 ms
+speedup         : 263.0x

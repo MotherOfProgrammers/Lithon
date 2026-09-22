@@ -39,11 +39,11 @@ jobs:
         run: |
           ./benchmark_fib | tee benchmark_output.txt
 
-      - name: Save benchmark result
+      - name: Parse benchmark
         run: |
           mkdir -p benchmarks/results
-          cp benchmark_output.txt benchmarks/results/latest.txt
+          python3 mamba/parse_benchmark.py benchmark_output.txt
 
-      - name: Show result
+      - name: Show structured result
         run: |
-          cat benchmarks/results/latest.txt
+          cat benchmarks/results/latest.json
