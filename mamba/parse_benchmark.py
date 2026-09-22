@@ -5,7 +5,10 @@ from pathlib import Path
 
 text = Path(sys.argv[1]).read_text()
 
-native = re.search(r"native compiled\s*:\s*([0-9.]+)\s*ms\s*\(result=(-?[0-9]+)\)",text)
+native = re.search(
+    r"native compiled\s*:\s*([0-9.]+)\s*ms\s*\(result=(-?[0-9]+)\)",
+    text
+)
 reference = re.search(r"interpreter\s*:\s*([0-9.]+)\s*ms",text)
 speedup = re.search(r"speedup\s*:\s*([0-9.]+)x",text)
 
@@ -21,5 +24,8 @@ result = {
     "status": "PASS",
 }
 
-Path("benchmarks/results/latest.json").write_text(json.dumps(result, indent=2) + "\n")
+Path("benchmarks/results/latest.json").write_text(
+    json.dumps(result, indent=2) + "\n"
+)
+
 print(json.dumps(result, indent=2))
