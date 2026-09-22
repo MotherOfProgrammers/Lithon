@@ -29,8 +29,21 @@ jobs:
           git config user.name "Lithon Reporter Mamba"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Verify bot repository access
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+      - name: Build benchmark
         run: |
-          gh api repos/${{ github.repository }}
+          g++ -std=c++20 -O2 -Isrc -o benchmark_fib \
+            src/jit/benchmark_fib.cpp \
+            src/interpreter/interpreter.cpp
+
+      - name: Run benchmark
+        run: |
+          ./benchmark_fib | tee benchmark_output.txt
+
+      - name: Save benchmark result
+        run: |
+          mkdir -p benchmarks/results
+          cp benchmark_output.txt benchmarks/results/latest.txt
+
+      - name: Show result
+        run: |
+          cat benchmarks/results/latest.txt
