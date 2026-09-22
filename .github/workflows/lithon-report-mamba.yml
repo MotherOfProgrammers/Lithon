@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   bot:
-    if: "${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'bot: update benchmark results') }}"
+    if: "${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'bot: update benchmark report') }}"
     runs-on: ubuntu-latest
 
     steps:
@@ -68,8 +68,12 @@ jobs:
           cp benchmarks/results/latest.json \
             "benchmarks/results/history/${GITHUB_SHA}.json"
 
+      - name: Update README
+        run: |
+          python3 mamba/update_readme.py
+
       - name: Commit benchmark results
         run: |
-          git add benchmarks/results
-          git diff --cached --quiet || git commit -m "bot: update benchmark results"
+          git add benchmarks/results README.md
+          git diff --cached --quiet || git commit -m "bot: update benchmark report"
           git push

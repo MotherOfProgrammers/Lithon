@@ -105,3 +105,17 @@ programmer to leave Python's syntax behind.
 Still early. Still opinionated. Still built to prove that giving
 Python real wings means being honest about what has to change to
 get there. 🪽
+
+<!-- MAMBA:BENCHMARK:START -->
+
+## ⚡ Latest Benchmark
+
+| Benchmark | Lithon JIT | Reference | Speedup | Result |
+|---|---:|---:|---:|---:|
+| fib(30) | 14.6568 ms | 3855.3177 ms | 263.0× | 832040 |
+
+**Status:** PASS
+
+_Last updated by Lithon Reporter Mamba._
+
+<!-- MAMBA:BENCHMARK:END -->
