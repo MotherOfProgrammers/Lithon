@@ -26,11 +26,11 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config user.name "Lithon Bot"
+          git config user.name "Lithon Reporter Mamba"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Verify bot identity
+      - name: Verify bot repository access
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          gh api /app
+          gh api repos/${{ github.repository }}
