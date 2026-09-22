@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   bot:
-    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'bot: update benchmark results')
+    if: "${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'bot: update benchmark results') }}"
     runs-on: ubuntu-latest
 
     steps:
