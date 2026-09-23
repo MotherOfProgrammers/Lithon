@@ -112,7 +112,7 @@ get there. 🪽
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 3.5320 ms | 758.3760 ms | 214.7× | 832040 |
+| fib(30) | 3.5727 ms | 757.2927 ms | 212.0× | 832040 |
 
 **Status:** PASS
 
