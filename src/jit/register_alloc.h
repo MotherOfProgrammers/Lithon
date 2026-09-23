@@ -24,10 +24,10 @@
 // value -- it is used purely as transient scratch space within a
 // single instruction's codegen when reading or writing a spilled
 // value (compile_function.h). This is necessary because RAX/RCX/RDX
-// are caller-saved per the System V ABI: any called function (or
-// anything IT calls) may clobber them, so a temporary whose live
-// range spans a Call must never live in one of them -- it is forced
-// to a stack slot instead, which survives any call.
+// are caller-saved per the System V ABI: any value a called function
+// (or anything IT calls) might clobber them, so a temporary whose
+// live range spans a Call must never live in one of them -- it is
+// forced to a stack slot instead, which survives any call.
 namespace lithon::jit {
 
 struct ValueLocation {
@@ -73,7 +73,7 @@ private:
     std::unordered_map<std::string, int> variable_offsets_;
     std::vector<std::string> variable_order_;
     std::unordered_map<lithon::ir::ValueId, ValueLocation> temp_locations_;
-    std::vector<int> call_indices_;
+    std::vector<int> call_indices_; // flat instruction indices of Call ops
     int next_slot_offset_ = 0;
     int frame_size_ = 0;
 
@@ -129,7 +129,16 @@ private:
     }
 
     void assign_temporary_locations() {
-        const std::vector<Reg> pool = {Reg::RAX, Reg::RCX, Reg::RDX};
+        // Only 2 registers allocatable to real %N values. RDX and RBX
+        // are BOTH reserved as dedicated read scratch (see
+        // compile_function.h): RDX for a binop's left operand, RBX
+        // for its right operand. This is not a stylistic choice --
+        // a single shared scratch register was found to silently
+        // corrupt results whenever BOTH operands of a binop were
+        // spilled simultaneously (the second spill-load clobbered
+        // the first before it was used). Two independent scratch
+        // registers make that class of bug structurally impossible.
+        const std::vector<Reg> pool = {Reg::RAX, Reg::RCX};
 
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries(
             liveness_.ranges().begin(), liveness_.ranges().end());
