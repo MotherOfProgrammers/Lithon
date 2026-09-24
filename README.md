@@ -14,6 +14,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/landing-hero.png" alt="Lithon docs landing page" width="900" />
+</p>
+
+---
+
 ## 🚀 What is Lithon?
 
 Lithon is a **Python-flavored language built for speed from the
