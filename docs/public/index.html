@@ -21,73 +21,66 @@
           <h1 class="hero-title">Lithon</h1>
           <p class="hero-tagline">Give Python wings.</p>
           <div class="badge-row">
-            <lithon-badge variant="orange">status: early design</lithon-badge>
-            <lithon-badge variant="blue">syntax: Python-like</lithon-badge>
-            <lithon-badge variant="green">typing: mandatory static</lithon-badge>
-            <lithon-badge variant="red">performance: C/Rust-class</lithon-badge>
-            <lithon-badge>license: TBD</lithon-badge>
+            <lithon-badge>status: early design</lithon-badge>
+            <lithon-badge>syntax: Python-like</lithon-badge>
+            <lithon-badge>typing: static</lithon-badge>
+            <lithon-badge>target: native</lithon-badge>
           </div>
           <p class="hero-copy">
-            <strong>Python-flavored, built for speed.</strong> Every value has a known, fixed
-            type decided before the program runs. No guessing, no dynamic dispatch, no boxed
-            objects. That trade lets Lithon compile straight to native code, as fast as C, C++,
-            and Rust.
+            <strong>Static types. Native code.</strong> Every type is fixed before run
+            time, so Lithon compiles straight to machine code, no interpreter in the way.
           </p>
           <div class="hero-cta">
             <a class="btn btn-primary" href="#install">Install Now</a>
             <a class="btn btn-ghost" href="#what">Why Lithon?</a>
           </div>
-          <p class="hero-meta">Python's syntax. C's speed.</p>
         </div>
 
         <aside class="quicklinks" aria-label="Quick links">
-          <lithon-quicklink href="#what" icon="rocket" title="Quickstart" desc="What Lithon is, in 5 minutes"></lithon-quicklink>
-          <lithon-quicklink href="#why" icon="bulb" title="Why Lithon?" desc="What Lithon solves"></lithon-quicklink>
-          <lithon-quicklink href="#roadmap" icon="map" title="Roadmap" desc="What's coming next"></lithon-quicklink>
-          <lithon-quicklink href="#community" icon="github" title="Contributing" desc="How to contribute"></lithon-quicklink>
+          <lithon-quicklink href="#what" icon="rocket" title="Quickstart"></lithon-quicklink>
+          <lithon-quicklink href="#why" icon="bulb" title="Why Lithon?"></lithon-quicklink>
+          <lithon-quicklink href="#roadmap" icon="map" title="Roadmap"></lithon-quicklink>
+          <lithon-quicklink href="#community" icon="github" title="Contributing"></lithon-quicklink>
         </aside>
       </div>
     </section>
 
     <section class="section" id="what">
       <lithon-section-title icon="rocket">What is Lithon?</lithon-section-title>
-      <div class="prose">
-        <p>
-          A <strong>Python-flavored language built for speed from the ground up.</strong>
-        </p>
-        <p>
-          Every value has a known, fixed type decided before the program runs. No guessing, no
-          dynamic dispatch, no boxed objects. That trade is what lets Lithon compile straight to
-          native code, as fast as C, C++, and Rust.
-        </p>
+      <div class="split">
+        <div class="prose">
+          <p>
+            A <strong>Python-flavored language built for speed.</strong> Types are fixed
+            before run time, so everything compiles straight to native code, no guessing,
+            no boxed objects, no interpreter.
+          </p>
+        </div>
+        <figure class="art-frame">
+          <img src="../../assets/boa.jpeg" alt="Cobra illustration from the Lithon assets" width="400" />
+        </figure>
       </div>
-      <figure class="art-frame">
-        <img src="../../assets/boa.jpeg" alt="Cobra illustration from the Lithon assets" width="400" />
-        <figcaption>Give Python wings.</figcaption>
-      </figure>
     </section>
 
     <section class="section" id="why">
       <lithon-section-title icon="bulb">Why Lithon?</lithon-section-title>
       <div class="prose prose-center">
         <p>
-          Python is fast to write, not fast to <em>run</em>. Every number is a heap object, every
-          <code>+</code> a runtime decision. Most fixes bolt speed on after the fact. Lithon asks
-          a more direct question:
+          Python is fast to write, not fast to <em>run</em>. Lithon asks a more direct
+          question:
         </p>
       </div>
       <lithon-quote>What if the language itself never allowed the slow path to exist in the first place?</lithon-quote>
       <div class="prose prose-center">
         <p>
-          No inference, no silent conversions, no interpreter overhead. If Lithon can't
-          <em>prove</em> something is safe and fast, it won't compile.
+          No silent conversions, no interpreter overhead. If Lithon can't
+          <em>prove</em> it's safe and fast, it won't compile.
         </p>
       </div>
 
       <div class="cards">
-        <lithon-card icon="grid" title="Unified">One language, prototype to production. Python-like syntax, every value statically typed.</lithon-card>
-        <lithon-card icon="bolt" title="Simply performant">Compiles to native code in the same class as C, C++, and Rust. No interpreter tax.</lithon-card>
-        <lithon-card icon="shield" title="Prove it, or it doesn't run">Can't prove it's safe and fast? It won't compile. No silent slow paths.</lithon-card>
+        <lithon-card icon="grid" title="Unified">One language, prototype to production. Python syntax, every value typed.</lithon-card>
+        <lithon-card icon="bolt" title="Simply performant">Native code in the class of C, C++, and Rust. No interpreter tax.</lithon-card>
+        <lithon-card icon="shield" title="Prove it, or it doesn't run">Can't prove it's safe and fast? It won't compile.</lithon-card>
       </div>
     </section>
 
@@ -98,9 +91,8 @@
 
     <section class="section feature-row" id="docs">
       <div class="feature-text">
-        <span class="feature-kicker">Python-like syntax</span>
         <h2>Reads like Python. Runs like C.</h2>
-        <p>Mandatory static types, checked before the program runs. Compile performance-critical paths straight to native code.</p>
+        <p>Static types, checked before run time. Hot paths compile straight to native code.</p>
         <a class="text-link" href="#docs">Explore the docs →</a>
       </div>
       <code-window title="fib.lithon"><span class="kw">def</span> <span class="fn">fib</span>(n: <span class="type">int</span>) -&gt; <span class="type">int</span>:
@@ -113,9 +105,8 @@
 
     <section class="section feature-row reverse" id="packages">
       <div class="feature-text">
-        <span class="feature-kicker">Compile-time safety</span>
         <h2>Types proved before run time.</h2>
-        <p>No boxed objects, no dynamic dispatch, no guessing. Just machine code that does exactly what the types say it will.</p>
+        <p>No boxed objects, no dynamic dispatch. Machine code that does exactly what the types say.</p>
         <a class="text-link" href="#benchmark">See the benchmarks →</a>
       </div>
       <code-window title="terminal"><span class="cm">$ lithon build fib.lithon</span>
@@ -126,32 +117,31 @@
     </section>
 
     <section class="section" id="use-cases">
-      <lithon-section-title icon="target" sub="The code Python usually hands off the moment performance matters.">Use cases</lithon-section-title>
+      <lithon-section-title icon="target" sub="Where Python usually hands off to C.">Use cases</lithon-section-title>
       <use-case-list></use-case-list>
     </section>
 
     <section class="section" id="roadmap">
-      <lithon-section-title icon="compass" sub="Early and opinionated. Built to prove what real speed costs.">Where this is headed</lithon-section-title>
+      <lithon-section-title icon="compass" sub="Early and opinionated.">Where this is headed</lithon-section-title>
       <div class="roadmap">
-        <phase-card tag="Phase 1 · completed" title="Core language" done>Python-like syntax, static typing, IR, and native codegen for arithmetic, control flow, and functions.</phase-card>
-        <phase-card tag="Phase 2 · in progress" title="Tooling &amp; ecosystem" current>Package manager, diagnostics, standard library, and an install story from zero to running fast.</phase-card>
-        <phase-card tag="Phase 3 · planned" title="Interop &amp; scale">Python interop, memory-safe ownership, and performance work to stay in the C/Rust class.</phase-card>
+        <phase-card tag="Phase 1 · completed" title="Core language" done>Syntax, static typing, IR, and native codegen.</phase-card>
+        <phase-card tag="Phase 2 · in progress" title="Tooling &amp; ecosystem" current>Package manager, diagnostics, stdlib, install story.</phase-card>
+        <phase-card tag="Phase 3 · planned" title="Interop &amp; scale">Python interop, ownership, performance work.</phase-card>
       </div>
     </section>
 
     <section class="section" id="benchmark">
-      <lithon-section-title icon="bolt" sub="Measured against a reference implementation on typed code.">Latest benchmark</lithon-section-title>
+      <lithon-section-title icon="bolt" sub="Typed code, against a reference implementation.">Latest benchmark</lithon-section-title>
       <benchmark-card></benchmark-card>
     </section>
 
     <section class="section cta-band" id="install">
       <h2>Get started</h2>
-      <p>Install Lithon and compile your first program in minutes.</p>
+      <p>Compile your first program in minutes.</p>
       <div class="hero-cta">
         <a class="btn btn-primary" href="#install">Install Now</a>
         <a class="btn btn-ghost" href="#docs">Quickstart guide</a>
       </div>
-      <p class="hero-meta">Status: early design | License: TBD | Syntax: Python-like</p>
     </section>
   </main>
 

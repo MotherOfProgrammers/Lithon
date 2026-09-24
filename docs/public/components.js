@@ -127,7 +127,6 @@
           </div>
           <div class="footer-bottom">
             <span>Early design. Built with HTML, CSS &amp; JS.</span>
-            <span>Palette: #474350 · #F8FFF4 · #FCFFEB · #FAFAC6 · #FECdaa</span>
           </div>
         </footer>`;
     }
@@ -142,7 +141,7 @@
       this.innerHTML = `
         <a class="quicklink" href="${href}">
           <span class="ql-icon">${icon(ic)}</span>
-          <span class="ql-text"><strong>${title}</strong><span>${desc}</span></span>
+          <span class="ql-text"><strong>${title}</strong>${desc ? `<span>${desc}</span>` : ""}</span>
         </a>`;
     }
   }
@@ -246,11 +245,11 @@
   class UseCaseList extends HTMLElement {
     connectedCallback() {
       const cases = [
-        ["bolt", "Numeric-heavy loops", "Simulations, signal processing, tight arithmetic that Python usually farms out to NumPy or C extensions."],
-        ["gauge", "Performance-sensitive tooling", "Game logic, real-time data processing, anything where interpreter overhead is the bottleneck."],
-        ["layers", "Data pipelines with predictable shapes", "Fixed schemas, known types, no need for Python's full dynamic flexibility."],
-        ["flask", "Learning how compilers actually work", "A small, honest, from-scratch language for exploring static typing and native codegen."],
-        ["tools", 'Python, but it has to be fast and correct', 'Where correctness and speed matter more than running every existing library.'],
+        ["bolt", "Numeric-heavy loops", "Simulations, signal processing, tight arithmetic Python farms out to NumPy."],
+        ["gauge", "Performance-sensitive tooling", "Game logic and real-time processing where the interpreter is the bottleneck."],
+        ["layers", "Predictable data pipelines", "Fixed schemas, known types, no dynamic flexibility needed."],
+        ["flask", "Learning how compilers work", "A small, from-scratch language for static typing and native codegen."],
+        ["tools", "Python that must be fast", "Where correctness and speed beat library availability."],
       ];
       this.classList.add("cards");
       this.innerHTML = cases
