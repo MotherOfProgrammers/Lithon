@@ -1,36 +1,47 @@
 (() => {
   const ICONS = {
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    clock: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /><path d="M12 7v5l3 3" />',
     sparkle:
-      '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M18 15l.9 2.3L21 18l-2.1.7L18 21l-.9-2.3L15 18l2.1-.7L18 15z"/>',
-    map: '<path d="M4 6h10l2 2h4v10H4z"/><path d="M4 6v12"/>',
+      '<path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6" />',
+    map: '<path d="M3 7l6 -3l6 3l6 -3v13l-6 3l-6 -3l-6 3v-13" /><path d="M9 4v13" /><path d="M15 7v13" />',
     github:
-      '<path d="M9 19c-4 1.5-4-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.3 4.3 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12 12 0 0 0-6 0C6.6 2.8 5.5 3.1 5.5 3.1a4.3 4.3 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
+      '<path d="M9 19c-4.3 1.4 -4.3 -2.5 -6 -3m12 5v-3.5c0 -1 .1 -1.4 -.5 -2c2.8 -.3 5.5 -1.4 5.5 -6a4.6 4.6 0 0 0 -1.3 -3.2a4.2 4.2 0 0 0 -.1 -3.2s-1.1 -.3 -3.5 1.3a12.3 12.3 0 0 0 -6.2 0c-2.4 -1.6 -3.5 -1.3 -3.5 -1.3a4.2 4.2 0 0 0 -.1 3.2a4.6 4.6 0 0 0 -1.3 3.2c0 4.6 2.7 5.7 5.5 6c-.6 .6 -.6 1.2 -.5 2v3.5" />',
     grid:
-      '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/>',
-    bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/>',
+      '<path d="M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /><path d="M14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /><path d="M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /><path d="M14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" />',
+    bolt: '<path d="M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11" />',
     shield:
-      '<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/>',
-    book: '<path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2V5z"/><path d="M8 7h6M8 11h6"/>',
+      '<path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /><path d="M15 19l2 2l4 -4" />',
+    book: '<path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0" /><path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0" /><path d="M3 6l0 13" /><path d="M12 6l0 13" /><path d="M21 6l0 13" />',
     rocket:
-      '<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2.1-.1-2.9-.8-.8-2.1-.7-2.9.1z"/><path d="M12 15l-3-3c.5-3.5 2.5-7.5 7-9.5 2-1 4.5-1.5 4.5-1.5s-.5 2.5-1.5 4.5c-2 4.5-6 6.5-9.5 7z"/><path d="M9 12H4s.5-3 2-4.5S11 6 11 6"/>',
+      '<path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" /><path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" /><path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />',
     gauge:
-      '<path d="M12 14l4-4"/><path d="M4.9 19a9 9 0 1 1 14.2 0"/>',
+      '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M13.41 10.59l2.59 -2.59" /><path d="M7 12a5 5 0 0 1 5 -5" />',
     terminal:
-      '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
+      '<path d="M8 9l3 3l-3 3" /><path d="M13 15l3 0" /><path d="M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12" />',
     flask:
-      '<path d="M9 3h6M10 3v6L5 19a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 19l-5-10V3"/><path d="M7.5 15h9"/>',
+      '<path d="M9 3l6 0" /><path d="M10 9l4 0" /><path d="M10 3v6l-4 11a.7 .7 0 0 0 .5 1h11a.7 .7 0 0 0 .5 -1l-4 -11v-6" />',
     layers:
-      '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+      '<path d="M12 4l-8 4l8 4l8 -4l-8 -4" /><path d="M4 12l8 4l8 -4" /><path d="M4 16l8 4l8 -4" />',
     tools:
-      '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3 2.7-2.7z"/>',
-    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
-    moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+      '<path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5" />',
+    sun: '<path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7" />',
+    moon: '<path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454l0 .008" />',
+    search: '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /><path d="M21 21l-6 -6" />',
     quote:
-      '<path d="M8 7H5a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 1-2 2H4M17 7h-3a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 1-2 2h-1"/>',
+      '<path d="M10 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5" /><path d="M19 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5" />',
     chart:
-      '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+      '<path d="M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6" /><path d="M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -10" /><path d="M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -14" /><path d="M4 20h14" />',
+    bulb: '<path d="M3 12h1m8 -9v1m8 8h1m-15.4 -6.4l.7 .7m12.1 -.7l-.7 .7" /><path d="M9 16a5 5 0 1 1 6 0a3.5 3.5 0 0 0 -1 3a2 2 0 0 1 -4 0a3.5 3.5 0 0 0 -1 -3" /><path d="M9.7 17l4.6 0" />',
+    versus:
+      '<path d="M4 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M16 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M11 6h5a2 2 0 0 1 2 2v8" /><path d="M14 9l-3 -3l3 -3" /><path d="M13 18h-5a2 2 0 0 1 -2 -2v-8" /><path d="M10 15l3 3l-3 3" />',
+    target:
+      '<path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0" /><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />',
+    compass:
+      '<path d="M8 16l2 -6l6 -2l-2 6l-6 2" /><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M12 3l0 2" /><path d="M12 19l0 2" /><path d="M3 12l2 0" /><path d="M19 12l2 0" />',
+    check: '<path d="M5 12l5 5l10 -10" />',
+    alert:
+      '<path d="M12 9v4" /><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0" /><path d="M12 16h.01" />',
+    x: '<path d="M18 6l-12 12" /><path d="M6 6l12 12" />',
   };
 
   const icon = (name, size = 20) =>
@@ -43,7 +54,7 @@
     connectedCallback() {
       const announcement =
         this.getAttribute("announcement") ||
-        'Lithon is in early design — <a href="https://github.com" target="_blank" rel="noopener">follow progress on GitHub</a>.';
+        'Lithon is in early design. <a href="https://github.com" target="_blank" rel="noopener">Follow progress on GitHub</a>.';
       const version = this.getAttribute("version") || "0.1.0";
       const links = (
         this.getAttribute("links") ||
@@ -62,7 +73,6 @@
           <div class="navbar-inner">
             <a class="brand" href="#">
               <span class="brand-mark">Lithon</span>
-              <img class="brand-mark-img" src="../../assets/boa.png" alt="" width="26" height="26" />
             </a>
             <nav class="nav-links" id="nav-links" aria-label="Primary">${links}</nav>
             <div class="nav-actions">
@@ -116,7 +126,7 @@
             </nav>
           </div>
           <div class="footer-bottom">
-            <span>Early design — built with HTML, CSS &amp; JS.</span>
+            <span>Early design. Built with HTML, CSS &amp; JS.</span>
             <span>Palette: #474350 · #F8FFF4 · #FCFFEB · #FAFAC6 · #FECdaa</span>
           </div>
         </footer>`;
@@ -139,18 +149,20 @@
 
   class LithonCard extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       const ic = this.getAttribute("icon") || "grid";
       const title = this.getAttribute("title") || "";
       this.classList.add("card");
       this.innerHTML = `
         <span class="card-icon">${icon(ic, 24)}</span>
         <h3>${title}</h3>
-        <p><slot></slot></p>`;
+        <p>${content}</p>`;
     }
   }
 
   class CodeWindow extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       const title = this.getAttribute("title") || "code";
       this.classList.add("code-window");
       this.innerHTML = `
@@ -158,41 +170,48 @@
           <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
           <span class="code-title">${title}</span>
         </div>
-        <pre><code><slot></slot></code></pre>`;
+        <pre><code>${content}</code></pre>`;
     }
   }
 
   class LithonSectionTitle extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       const sub = this.getAttribute("sub");
+      const ic = this.getAttribute("icon");
       this.innerHTML = `
-        <h2 class="section-title"><slot></slot></h2>
+        <h2 class="section-title">${ic ? `<span class="section-icon">${icon(ic, 32)}</span>` : ""}${content}</h2>
         ${sub ? `<p class="section-sub">${sub}</p>` : ""}`;
     }
   }
 
   class LithonBadge extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       const variant = this.getAttribute("variant") || "neutral";
-      this.innerHTML = `<span class="badge badge-${variant}"><slot></slot></span>`;
+      this.innerHTML = `<span class="badge badge-${variant}">${content}</span>`;
     }
   }
 
   class LithonQuote extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       this.classList.add("readme-quote");
-      this.innerHTML = `<blockquote>${icon("quote", 22)}<p><slot></slot></p></blockquote>`;
+      this.innerHTML = `<blockquote>${icon("quote", 22)}<p>${content}</p></blockquote>`;
     }
   }
 
   class CompareTable extends HTMLElement {
     connectedCallback() {
+      const ok = `<span class="i-ok">${icon("check", 16)}</span>`;
+      const warn = `<span class="i-warn">${icon("alert", 16)}</span>`;
+      const no = `<span class="i-no">${icon("x", 16)}</span>`;
       const rows = [
         ["Syntax", "Python", "Python + annotations", "Python-like"],
         ["Typing", "Dynamic", "Optional", "<strong>Mandatory</strong>"],
-        ["Speed on typed code", "🐢", "🚗", "🚀"],
-        ["Silent type coercion", "✅ allowed", "⚠️ partial", "❌ never"],
-        ["Runtime type guessing", "✅", "⚠️ partial", "❌ never"],
+        ["Speed on typed code", "Slow", "Fast", "<strong>Native</strong>"],
+        ["Silent type coercion", `${ok} allowed`, `${warn} partial`, `${no} never`],
+        ["Runtime type guessing", ok, `${warn} partial`, `${no} never`],
         ["Compiles to", "Bytecode", "C, then native", "Native machine code"],
         [
           "Philosophy",
@@ -220,9 +239,7 @@
               .join("")}
           </tbody>
         </table>
-        <p class="table-note">Lithon isn't trying to run your existing <code>.py</code> files unmodified.
-        It's a stricter, sharper language that happens to speak Python's dialect — built for the code
-        you'd <em>want</em> to be fast, not the code you happen to already have.</p>`;
+        <p class="table-note">Not a <code>.py</code> runner. A stricter language for the code you <em>want</em> to be fast.</p>`;
     }
   }
 
@@ -247,6 +264,7 @@
 
   class PhaseCard extends HTMLElement {
     connectedCallback() {
+      const content = this.innerHTML;
       const tag = this.getAttribute("tag") || "";
       const title = this.getAttribute("title") || "";
       const done = this.hasAttribute("done");
@@ -256,7 +274,7 @@
       this.innerHTML = `
         <span class="phase-tag ${done ? "done" : ""}">${tag}</span>
         <h3>${title}</h3>
-        <p><slot></slot></p>`;
+        <p>${content}</p>`;
     }
   }
 
