@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lithon — Give Python wings</title>
+  <meta name="description" content="Lithon is a Python-flavored language built for speed from the ground up. Static types, native code, C/Rust-class performance." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <lithon-navbar></lithon-navbar>
+
+  <main id="main">
+    <section class="hero">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <div class="hero-left">
+          <div class="hero-heading">
+            <h1 class="hero-title">Lithon</h1>
+            <img class="hero-mascot" src="../../assets/boa.png" alt="Lithon cobra mascot" width="180" />
+          </div>
+          <p class="hero-tagline">Give Python wings.</p>
+          <div class="badge-row">
+            <lithon-badge variant="orange">status: early design</lithon-badge>
+            <lithon-badge variant="blue">syntax: Python-like</lithon-badge>
+            <lithon-badge variant="green">typing: mandatory static</lithon-badge>
+            <lithon-badge variant="red">performance: C/Rust-class</lithon-badge>
+            <lithon-badge>license: TBD</lithon-badge>
+          </div>
+          <p class="hero-copy">
+            Lithon is a <strong>Python-flavored language built for speed from the ground up.</strong>
+            It looks like Python. It reads like Python. But every value has a known, fixed type,
+            decided before the program ever runs — no guessing, no dynamic dispatch, no boxed
+            objects hiding behind every number and string.
+          </p>
+          <p class="hero-copy">
+            That one trade lets Lithon compile straight down to native machine code in the same
+            performance class as C, C++, and Rust.
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#install">Install Now</a>
+            <a class="btn btn-ghost" href="#what">Why Lithon?</a>
+          </div>
+          <p class="hero-meta">Python gave the world a language that's a joy to write. Lithon is what happens when that syntax runs like it was written in C.</p>
+        </div>
+
+        <aside class="quicklinks" aria-label="Quick links">
+          <lithon-quicklink href="#what" icon="rocket" title="Quickstart" desc="Learn what Lithon is in 5 minutes"></lithon-quicklink>
+          <lithon-quicklink href="#why" icon="sparkle" title="Why Lithon?" desc="Understand what Lithon solves"></lithon-quicklink>
+          <lithon-quicklink href="#roadmap" icon="map" title="Roadmap" desc="See what's coming next"></lithon-quicklink>
+          <lithon-quicklink href="#community" icon="github" title="Contributing" desc="Learn how to contribute to Lithon"></lithon-quicklink>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="what">
+      <lithon-section-title>🚀 What is Lithon?</lithon-section-title>
+      <div class="prose">
+        <p>
+          Lithon is a <strong>Python-flavored language built for speed from the ground up.</strong>
+        </p>
+        <p>
+          It looks like Python. It reads like Python. But under the hood, it makes a different
+          promise: <strong>every value has a known, fixed type, decided before the program ever
+          runs</strong> — no guessing, no dynamic dispatch, no boxed objects hiding behind every
+          number and string.
+        </p>
+        <p>
+          That one trade — explicit types instead of Python's "figure it out at runtime"
+          flexibility — is what lets Lithon compile straight down to native machine code that runs
+          in the same performance class as C, C++, and Rust.
+        </p>
+        <p>Python gave the world a language that's a joy to write. Lithon is what happens when that same syntax is asked to run like it was written in C.</p>
+      </div>
+      <figure class="art-frame">
+        <img src="../../assets/boa.jpeg" alt="Cobra illustration from the Lithon assets" width="400" />
+        <figcaption>🐍 Give Python wings.</figcaption>
+      </figure>
+    </section>
+
+    <section class="section" id="why">
+      <lithon-section-title>💡 Why Lithon?</lithon-section-title>
+      <div class="prose prose-center">
+        <p>
+          Python is loved for being readable, expressive, and fast to write. It is not loved for
+          being fast to <em>run</em>. Every number is a heap object. Every <code>+</code> is a
+          runtime decision. Every function call pays a tax just for being dynamic.
+        </p>
+        <p>
+          A lot of tools try to fix this by bolting speed onto Python after the fact — JIT warmup
+          tricks, C extensions, "just rewrite the hot part in Rust." Lithon asks a more direct
+          question:
+        </p>
+      </div>
+      <lithon-quote>What if the language itself never allowed the slow path to exist in the first place?</lithon-quote>
+      <div class="prose prose-center">
+        <p>
+          No inference guessing your intent. No silent conversions hiding bugs. No interpreter
+          overhead on the critical path. If Lithon can't <em>prove</em> something is safe and fast,
+          it won't compile — instead of quietly running slow, or worse, running wrong.
+        </p>
+      </div>
+
+      <div class="cards">
+        <lithon-card icon="grid" title="Unified">One language from prototype to production. Same Python-like syntax, but every value has a known, fixed type decided before the program ever runs.</lithon-card>
+        <lithon-card icon="bolt" title="Simply performant">No choosing between productivity and performance. Lithon compiles to native machine code in the same class as C, C++, and Rust — no interpreter tax.</lithon-card>
+        <lithon-card icon="shield" title="Prove it, or it doesn't run">If Lithon can't prove something is safe and fast, it won't compile — instead of quietly running slow, or worse, running wrong.</lithon-card>
+      </div>
+    </section>
+
+    <section class="section" id="compare">
+      <lithon-section-title sub="Lithon trades Python's dynamic freedom for compile-time certainty — on purpose.">🆚 How is this different?</lithon-section-title>
+      <compare-table></compare-table>
+    </section>
+
+    <section class="section feature-row" id="docs">
+      <div class="feature-text">
+        <span class="feature-kicker">Python-like syntax</span>
+        <h2>Reads like Python. Runs like C.</h2>
+        <p>
+          Mandatory static types, checked before the program ever runs. Keep the syntax you love
+          and compile performance-critical paths straight to native code.
+        </p>
+        <a class="text-link" href="#docs">Explore the docs →</a>
+      </div>
+      <code-window title="fib.lithon"><span class="kw">def</span> <span class="fn">fib</span>(n: <span class="type">int</span>) -&gt; <span class="type">int</span>:
+    <span class="kw">if</span> n &lt; <span class="num">2</span>:
+        <span class="kw">return</span> n
+    <span class="kw">return</span> <span class="fn">fib</span>(n - <span class="num">1</span>) + <span class="fn">fib</span>(n - <span class="num">2</span>)
+
+<span class="fn">print</span>(<span class="fn">fib</span>(<span class="num">30</span>))  <span class="cm"># native, statically type-checked</span></code-window>
+    </section>
+
+    <section class="section feature-row reverse" id="packages">
+      <div class="feature-text">
+        <span class="feature-kicker">Compile-time safety</span>
+        <h2>Types proved before run time.</h2>
+        <p>
+          No boxed objects, no dynamic dispatch, no guessing — just machine code that does exactly
+          what the types say it will.
+        </p>
+        <a class="text-link" href="#benchmark">See the benchmarks →</a>
+      </div>
+      <code-window title="terminal"><span class="cm">$ lithon build fib.lithon</span>
+<span class="ok">✓</span> typecheck  <span class="dim">static types verified</span>
+<span class="ok">✓</span> codegen    <span class="dim">native binary: ./fib</span>
+<span class="cm">$ ./fib</span>
+832040</code-window>
+    </section>
+
+    <section class="section" id="use-cases">
+      <lithon-section-title sub="Aimed at the code Python traditionally hands off to something else the moment performance matters.">🎯 Use cases</lithon-section-title>
+      <use-case-list></use-case-list>
+    </section>
+
+    <section class="section" id="roadmap">
+      <lithon-section-title sub="Still early. Still opinionated. Still built to prove that giving Python real wings means being honest about what has to change.">🧭 Where this is headed</lithon-section-title>
+      <div class="roadmap">
+        <phase-card tag="Phase 1 · completed" title="Core language" done>Python-like syntax, mandatory static typing, IR, and a native codegen pipeline for arithmetic, control flow, and functions.</phase-card>
+        <phase-card tag="Phase 2 · in progress" title="Tooling &amp; ecosystem" current>Package manager, better diagnostics, standard library coverage, and an install story that gets you from zero to running fast.</phase-card>
+        <phase-card tag="Phase 3 · planned" title="Interop &amp; scale">Python interop, memory-safe ownership features, and performance work that keeps Lithon in the C/Rust class.</phase-card>
+      </div>
+    </section>
+
+    <section class="section" id="benchmark">
+      <lithon-section-title sub="Measured against a reference implementation on typed code.">⚡ Latest Benchmark</lithon-section-title>
+      <benchmark-card></benchmark-card>
+    </section>
+
+    <section class="section cta-band" id="install">
+      <h2>Get started</h2>
+      <p>Install Lithon and compile your first program in minutes.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#install">Install Now</a>
+        <a class="btn btn-ghost" href="#docs">Quickstart guide</a>
+      </div>
+      <p class="hero-meta">Status: early design | License: TBD | Syntax: Python-like</p>
+    </section>
+  </main>
+
+  <lithon-footer></lithon-footer>
+
+  <div class="search-modal" id="search-modal" hidden>
+    <div class="search-dialog" role="dialog" aria-modal="true" aria-label="Search">
+      <input type="search" id="search-input" placeholder="Search docs…" autocomplete="off" />
+      <ul id="search-results"></ul>
+      <p class="search-hint">Press <kbd>Esc</kbd> to close</p>
+    </div>
+  </div>
+
+  <script src="components.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
