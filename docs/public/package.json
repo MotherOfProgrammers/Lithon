@@ -1,9 +1,5 @@
 {
-  "name": "lithon-docs-site",
-  "private": true,
-  "description": "Static Lithon docs site. Self-hosted JetBrains Mono Variable font, installed via `bun install`.",
   "dependencies": {
-    "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@tabler/icons": "^3.48.0"
+    "typescript": "^7.0.2"
   }
 }

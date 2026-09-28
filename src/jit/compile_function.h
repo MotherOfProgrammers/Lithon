@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -13,31 +14,37 @@
 // The real bridge: walks typed ir::Functions and drives the encoder
 // + register allocator to produce genuine, runnable machine code.
 //
-// This slice adds function CALLS between compiled functions (needed
-// for recursion, e.g. fib), on top of straight-line arithmetic,
-// control flow, and comparisons already proven working.
+// CRITICAL CORRECTNESS FIX in this revision: earlier codegen used a
+// single shared scratch register (RBX) to reload BOTH operands of a
+// binary op when spilled. When both operands were spilled
+// simultaneously, the second load silently clobbered the first
+// before it was used -- found via a deliberately adversarial And/Or
+// test where the two ops share operands and produce DIFFERENT
+// correct answers, exposing the corruption.
 //
-// Because a Call can target ANY function in the module -- including
-// itself, for recursion, or one compiled later in the module -- all
-// of a module's functions are compiled into ONE shared CodeBuffer,
-// with a two-pass patch scheme covering both intra-function jumps
-// (resolved once that function's blocks are done) and inter-function
-// calls (resolved only once EVERY function has been compiled, since
-// a call may target a function that hasn't been emitted yet).
+// The fix: TWO dedicated, permanently-reserved scratch registers:
+//   - RDX: left operand of a binop / the single operand of a
+//     one-operand op / the compute-and-store register for a spilled
+//     RESULT.
+//   - RBX: right operand of a binop.
+// The allocatable pool for real %N values shrinks to RAX/RCX
+// (register_alloc.h).
 //
-// Spilled temporaries: RBX is reserved, never assigned to a %N value
-// (see register_alloc.h) -- it is used purely as transient scratch
-// within a single instruction's codegen to read or write a spilled
-// value's stack slot. This is necessary correctness, not an
-// optimization gap: RAX/RCX/RDX are caller-saved, so any temporary
-// whose live range spans a Call is forced to a stack slot by the
-// allocator, and RBX is how codegen touches that slot's value for
-// one instruction without needing a permanent register of its own.
+// This slice also adds: And/Or/Not (matching the interpreter's exact
+// short-circuit VALUE semantics), and print() for integers via a
+// real call into the host process's own libc printf.
 //
-// Still out of scope, documented: floats, And/Or/Not, more than 2
-// parameters (System V rdi/rsi only), print() in native codegen.
+// KNOWN, DOCUMENTED LIMITATION: print() always formats as a 64-bit
+// integer. It does not know if a value is actually bool/float (that
+// type info isn't threaded into this untyped-IR-level codegen pass
+// yet). Printing a bool natively shows 1/0 instead of True/False --
+// explicit, documented, not a silent bug.
 
 namespace lithon::jit {
+
+namespace {
+static const char kIntPrintFormat[] = "%lld\n";
+}
 
 struct CompiledModule {
     std::vector<uint8_t> code;
@@ -71,7 +78,14 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
 
         RegisterAllocator alloc(fn);
 
-        auto read_value = [&](ValueId id) -> Reg {
+        auto read_left = [&](ValueId id) -> Reg {
+            const ValueLocation& loc = alloc.temp_location(id);
+            if (loc.in_register) return loc.reg;
+            emit_load_rbp_offset(code, Reg::RDX, loc.stack_slot);
+            return Reg::RDX;
+        };
+
+        auto read_right = [&](ValueId id) -> Reg {
             const ValueLocation& loc = alloc.temp_location(id);
             if (loc.in_register) return loc.reg;
             emit_load_rbp_offset(code, Reg::RBX, loc.stack_slot);
@@ -80,7 +94,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
 
         auto compute_dest = [&](ValueId id) -> Reg {
             const ValueLocation& loc = alloc.temp_location(id);
-            return loc.in_register ? loc.reg : Reg::RBX;
+            return loc.in_register ? loc.reg : Reg::RDX;
         };
 
         auto commit_result = [&](ValueId id, Reg computed_in) {
@@ -127,7 +141,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                         break;
                     }
                     case Op::Store: {
-                        Reg src = read_value(instr.args.at(0));
+                        Reg src = read_left(instr.args.at(0));
                         if (!alloc.has_variable(instr.name)) {
                             throw std::runtime_error(
                                 "compile_module: store to undeclared variable '" + instr.name + "'");
@@ -138,8 +152,8 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                     case Op::Add:
                     case Op::Sub:
                     case Op::Mul: {
-                        Reg lhs = read_value(instr.args.at(0));
-                        Reg rhs = read_value(instr.args.at(1));
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
                         Reg dst = compute_dest(instr.result);
                         emit_mov_reg_reg(code, dst, lhs);
                         if (instr.op == Op::Add) emit_add_reg_reg(code, dst, rhs);
@@ -151,8 +165,8 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                     case Op::Lt:
                     case Op::Gt:
                     case Op::Eq: {
-                        Reg lhs = read_value(instr.args.at(0));
-                        Reg rhs = read_value(instr.args.at(1));
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
                         Reg dst = compute_dest(instr.result);
                         Cond cond = instr.op == Op::Lt ? Cond::Less
                                   : instr.op == Op::Gt ? Cond::Greater
@@ -163,8 +177,49 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                         commit_result(instr.result, dst);
                         break;
                     }
+                    case Op::And: {
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
+                        Reg dst = compute_dest(instr.result);
+
+                        emit_test_reg_reg(code, lhs);
+                        JumpPatch to_use_rhs = emit_jcc_rel32(code, Cond::NotZero);
+                        emit_mov_reg_reg(code, dst, lhs);
+                        JumpPatch to_end = emit_jmp_rel32(code);
+                        resolve_jump_patch(code, to_use_rhs, code.size());
+                        emit_mov_reg_reg(code, dst, rhs);
+                        resolve_jump_patch(code, to_end, code.size());
+
+                        commit_result(instr.result, dst);
+                        break;
+                    }
+                    case Op::Or: {
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
+                        Reg dst = compute_dest(instr.result);
+
+                        emit_test_reg_reg(code, lhs);
+                        JumpPatch to_use_lhs = emit_jcc_rel32(code, Cond::NotZero);
+                        emit_mov_reg_reg(code, dst, rhs);
+                        JumpPatch to_end = emit_jmp_rel32(code);
+                        resolve_jump_patch(code, to_use_lhs, code.size());
+                        emit_mov_reg_reg(code, dst, lhs);
+                        resolve_jump_patch(code, to_end, code.size());
+
+                        commit_result(instr.result, dst);
+                        break;
+                    }
+                    case Op::Not: {
+                        Reg operand = read_left(instr.args.at(0));
+                        Reg dst = compute_dest(instr.result);
+                        emit_test_reg_reg(code, operand);
+                        emit_setcc(code, Cond::Equal, dst);
+                        emit_movzx_reg_reg8(code, dst, dst);
+                        commit_result(instr.result, dst);
+                        break;
+                    }
                     case Op::Branch: {
-                        Reg cond_reg = read_value(instr.args.at(0));
+                        Reg cond_reg = read_left(instr.args.at(0));
                         size_t comma = instr.name.find(',');
                         std::string then_label = instr.name.substr(0, comma);
                         std::string else_label = instr.name.substr(comma + 1);
@@ -184,21 +239,30 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                     }
                     case Op::Call: {
                         if (instr.name == "print") {
-                            throw std::runtime_error(
-                                "compile_module: print() calls not implemented in "
-                                "native codegen yet -- interpreter-only for now");
+                            Reg val = read_left(instr.args.at(0));
+                            emit_mov_reg_imm64(code, Reg::RDI,
+                                reinterpret_cast<int64_t>(kIntPrintFormat));
+                            emit_mov_reg_reg(code, Reg::RSI, val);
+                            emit_mov_reg_imm64(code, Reg::RCX,
+                                reinterpret_cast<int64_t>(&std::printf));
+                            emit_xor_zero(code, Reg::RAX);
+                            emit_call_reg(code, Reg::RCX);
+                            break;
                         }
                         if (instr.args.size() > 2) {
                             throw std::runtime_error(
                                 "compile_module: calls with more than 2 arguments "
                                 "not supported in this slice");
                         }
+                        Reg arg_vals[2];
                         for (size_t i = 0; i < instr.args.size(); ++i) {
-                            Reg src = read_value(instr.args[i]);
-                            emit_mov_reg_reg(code, arg_regs[i], src);
+                            arg_vals[i] = (i == 0) ? read_left(instr.args[i]) : read_right(instr.args[i]);
+                        }
+                        for (size_t i = 0; i < instr.args.size(); ++i) {
+                            emit_mov_reg_reg(code, arg_regs[i], arg_vals[i]);
                         }
                         JumpPatch to_callee = emit_jmp_rel32(code);
-                        code[to_callee.rel32_offset - 1] = 0xE8; // jmp -> call
+                        code[to_callee.rel32_offset - 1] = 0xE8;
                         pending_calls.push_back({to_callee, instr.name});
 
                         if (instr.result != kInvalidValue) {
@@ -212,7 +276,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                     }
                     case Op::Return: {
                         if (!instr.args.empty()) {
-                            Reg src = read_value(instr.args.at(0));
+                            Reg src = read_left(instr.args.at(0));
                             if (src != Reg::RAX) {
                                 emit_mov_reg_reg(code, Reg::RAX, src);
                             }
@@ -224,7 +288,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                     default:
                         throw std::runtime_error(
                             "compile_module: opcode not implemented in this slice "
-                            "(boolean ops And/Or/Not and floats are future increments)");
+                            "(floats are the main remaining gap)");
                 }
             }
         }

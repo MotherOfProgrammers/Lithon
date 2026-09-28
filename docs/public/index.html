@@ -1,161 +1,46 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lithon: Give Python wings</title>
-  <meta name="description" content="Lithon is a Python-flavored language built for speed from the ground up. Static types, native code, C/Rust-class performance." />
-  <link rel="stylesheet" href="fonts/fonts.css" />
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to main content</a>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Lithon website homepage." />
+    <!-- Automatic redirect after 0 seconds -->
+    <meta http-equiv="refresh" content="0; url=src/index.html" />
+    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+    <title>Lithon | homepage</title>
+    <!-- Instant JavaScript Fallback -->
+    <script>
+      window.location.replace("src/index.html");
+    </script>
 
-  <lithon-navbar></lithon-navbar>
-
-  <main id="main">
-    <section class="hero">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <div class="hero-inner">
-        <div class="hero-left">
-          <h1 class="hero-title">Lithon</h1>
-          <p class="hero-tagline">Give Python wings.</p>
-          <div class="badge-row">
-            <lithon-badge>status: early design</lithon-badge>
-            <lithon-badge>syntax: Python-like</lithon-badge>
-            <lithon-badge>typing: static</lithon-badge>
-            <lithon-badge>target: native</lithon-badge>
-          </div>
-          <p class="hero-copy">
-            <strong>Static types. Native code.</strong> Every type is fixed before run
-            time, so Lithon compiles straight to machine code, no interpreter in the way.
-          </p>
-          <div class="hero-cta">
-            <a class="btn btn-primary" href="#install">Install Now</a>
-            <a class="btn btn-ghost" href="#what">Why Lithon?</a>
-          </div>
-        </div>
-
-        <aside class="quicklinks" aria-label="Quick links">
-          <lithon-quicklink href="#what" icon="rocket" title="Quickstart"></lithon-quicklink>
-          <lithon-quicklink href="#why" icon="bulb" title="Why Lithon?"></lithon-quicklink>
-          <lithon-quicklink href="#roadmap" icon="map" title="Roadmap"></lithon-quicklink>
-          <lithon-quicklink href="#community" icon="github" title="Contributing"></lithon-quicklink>
-        </aside>
-      </div>
-    </section>
-
-    <section class="section" id="what">
-      <lithon-section-title icon="rocket">What is Lithon?</lithon-section-title>
-      <div class="split">
-        <div class="prose">
-          <p>
-            A <strong>Python-flavored language built for speed.</strong> Types are fixed
-            before run time, so everything compiles straight to native code, no guessing,
-            no boxed objects, no interpreter.
-          </p>
-        </div>
-        <figure class="art-frame">
-          <img src="../../assets/boa.jpeg" alt="Cobra illustration from the Lithon assets" width="400" />
-        </figure>
-      </div>
-    </section>
-
-    <section class="section" id="why">
-      <lithon-section-title icon="bulb">Why Lithon?</lithon-section-title>
-      <div class="prose prose-center">
-        <p>
-          Python is fast to write, not fast to <em>run</em>. Lithon asks a more direct
-          question:
-        </p>
-      </div>
-      <lithon-quote>What if the language itself never allowed the slow path to exist in the first place?</lithon-quote>
-      <div class="prose prose-center">
-        <p>
-          No silent conversions, no interpreter overhead. If Lithon can't
-          <em>prove</em> it's safe and fast, it won't compile.
-        </p>
-      </div>
-
-      <div class="cards">
-        <lithon-card icon="grid" title="Unified">One language, prototype to production. Python syntax, every value typed.</lithon-card>
-        <lithon-card icon="bolt" title="Simply performant">Native code in the class of C, C++, and Rust. No interpreter tax.</lithon-card>
-        <lithon-card icon="shield" title="Prove it, or it doesn't run">Can't prove it's safe and fast? It won't compile.</lithon-card>
-      </div>
-    </section>
-
-    <section class="section" id="compare">
-      <lithon-section-title icon="versus" sub="Compile-time certainty instead of Python's dynamic freedom.">How is this different?</lithon-section-title>
-      <compare-table></compare-table>
-    </section>
-
-    <section class="section feature-row" id="docs">
-      <div class="feature-text">
-        <h2>Reads like Python. Runs like C.</h2>
-        <p>Static types, checked before run time. Hot paths compile straight to native code.</p>
-        <a class="text-link" href="#docs">Explore the docs →</a>
-      </div>
-      <code-window title="fib.lithon"><span class="kw">def</span> <span class="fn">fib</span>(n: <span class="type">int</span>) -&gt; <span class="type">int</span>:
-    <span class="kw">if</span> n &lt; <span class="num">2</span>:
-        <span class="kw">return</span> n
-    <span class="kw">return</span> <span class="fn">fib</span>(n - <span class="num">1</span>) + <span class="fn">fib</span>(n - <span class="num">2</span>)
-
-<span class="fn">print</span>(<span class="fn">fib</span>(<span class="num">30</span>))  <span class="cm"># native, statically type-checked</span></code-window>
-    </section>
-
-    <section class="section feature-row reverse" id="packages">
-      <div class="feature-text">
-        <h2>Types proved before run time.</h2>
-        <p>No boxed objects, no dynamic dispatch. Machine code that does exactly what the types say.</p>
-        <a class="text-link" href="#benchmark">See the benchmarks →</a>
-      </div>
-      <code-window title="terminal"><span class="cm">$ lithon build fib.lithon</span>
-<span class="ok">✓</span> typecheck  <span class="dim">static types verified</span>
-<span class="ok">✓</span> codegen    <span class="dim">native binary: ./fib</span>
-<span class="cm">$ ./fib</span>
-832040</code-window>
-    </section>
-
-    <section class="section" id="use-cases">
-      <lithon-section-title icon="target" sub="Where Python usually hands off to C.">Use cases</lithon-section-title>
-      <use-case-list></use-case-list>
-    </section>
-
-    <section class="section" id="roadmap">
-      <lithon-section-title icon="compass" sub="Early and opinionated.">Where this is headed</lithon-section-title>
-      <div class="roadmap">
-        <phase-card tag="Phase 1 · completed" title="Core language" done>Syntax, static typing, IR, and native codegen.</phase-card>
-        <phase-card tag="Phase 2 · in progress" title="Tooling &amp; ecosystem" current>Package manager, diagnostics, stdlib, install story.</phase-card>
-        <phase-card tag="Phase 3 · planned" title="Interop &amp; scale">Python interop, ownership, performance work.</phase-card>
-      </div>
-    </section>
-
-    <section class="section" id="benchmark">
-      <lithon-section-title icon="bolt" sub="Typed code, against a reference implementation.">Latest benchmark</lithon-section-title>
-      <benchmark-card></benchmark-card>
-    </section>
-
-    <section class="section cta-band" id="install">
-      <h2>Get started</h2>
-      <p>Compile your first program in minutes.</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="#install">Install Now</a>
-        <a class="btn btn-ghost" href="#docs">Quickstart guide</a>
-      </div>
-    </section>
-  </main>
-
-  <lithon-footer></lithon-footer>
-
-  <div class="search-modal" id="search-modal" hidden>
-    <div class="search-dialog" role="dialog" aria-modal="true" aria-label="Search">
-      <input type="search" id="search-input" placeholder="Search docs…" autocomplete="off" />
-      <ul id="search-results"></ul>
-      <p class="search-hint">Press <kbd>Esc</kbd> to close</p>
+    <style>
+      :root {
+        --paper: #f8fff4;
+        --ink: #474350;
+        --peach: #fecdaa;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .wrap {
+        text-align: center;
+        padding: 2rem;
+      }
+      a {
+        color: var(--ink);
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <p>Opening <a href="src/index.html">Lithon</a>…</p>
     </div>
-  </div>
-
-  <script src="components.js"></script>
-  <script src="script.js"></script>
-</body>
+  </body>
 </html>

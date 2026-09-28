@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Lithon | Not a revolution but an evolution of the same bloodline. A zero-dependency, dual-tier execution engine built for native speed."
+    />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Lithon | Python syntax, native speed" />
+    <meta
+      property="og:description"
+      content="A zero-dependency, dual-tier execution engine that turns statically verified Python-flavored code into guard-free x86-64 instructions."
+    />
+    <meta name="twitter:card" content="summary" />
+    <title>Lithon | Not a revolution but an evolution of the same bloodline</title>
+    <link rel="icon" href="../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles/base.css" />
+    <link rel="stylesheet" href="styles/pages/home.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="#engine">The engine</a>
+          <a href="pages/docs.html">Docs</a>
+          <a href="pages/use-cases.html">Use cases</a>
+          <a href="pages/roadmap.html">Roadmap</a>
+          <a href="pages/playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero container">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span class="eyebrow-dot"></span> Open source · Python-flavored · Native speed</div>
+          <h1>Not a <em>revolution</em><br />but an evolution<br />of the same bloodline</h1>
+          <p class="hero-lede">
+            Lithon is a zero-dependency execution engine that turns statically verified Python-flavored code into raw,
+            guard-free x86-64 instructions.
+          </p>
+          <div class="heritage-note">
+            <span class="heritage-note__label">The lineage</span>
+            <span>Where Holy-Grail of Ancestors Discipline shines the future.</span>
+          </div>
+          <div class="hero-ctas">
+            <a class="button button--primary" href="#quickstart">
+              <span>Start building</span>
+              <span class="button-arrow">↗</span>
+            </a>
+            <a class="text-link" href="#engine">Explore the engine <span>↓</span></a>
+          </div>
+          <div class="hero-trust">
+            <span class="trust-line"></span>
+            <span>Designed in Sri Lanka</span>
+            <span class="trust-line trust-line--short"></span>
+            <span>Apache 2.0</span>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal reveal--delay">
+          <div class="hero-orbit hero-orbit--one"></div>
+          <div class="hero-orbit hero-orbit--two"></div>
+          <div class="hero-orbit hero-orbit--three"></div>
+          <div class="hero-glow"></div>
+          <div class="hero-code-card">
+            <div class="window-bar">
+              <div class="window-dots"><span></span><span></span><span></span></div>
+              <span class="window-title">fib.py · lithon</span>
+              <span class="window-status"><i></i> ready</span>
+            </div>
+            <div class="code-content">
+              <div class="code-line">
+                <span class="line-number">01</span>
+                <span><b class="code-keyword">def</b> <b class="code-function">fib</b>(n: <b class="code-type">int</b>) -&gt; <b class="code-type">int</b>:</span>
+              </div>
+              <div class="code-line">
+                <span class="line-number">02</span>
+                <span class="indent"><b class="code-keyword">if</b> n &lt; <span class="code-number">2</span>:</span>
+              </div>
+              <div class="code-line">
+                <span class="line-number">03</span><span class="indent double"><b class="code-keyword">return</b> n</span>
+              </div>
+              <div class="code-line">
+                <span class="line-number">04</span>
+                <span class="indent"
+                  ><b class="code-keyword">return</b> fib(n - <span class="code-number">1</span>) + fib(n -
+                  <span class="code-number">2</span>)</span
+                >
+              </div>
+              <div class="code-line code-line--blank"><span class="line-number">05</span></div>
+              <div class="code-line">
+                <span class="line-number">06</span><span><b class="code-function">print</b>(fib(<span class="code-number">30</span>))</span>
+              </div>
+            </div>
+            <div class="code-result">
+              <div><span class="result-prompt">lithon</span><span class="result-caret">›</span> <span>static flow verified</span></div>
+              <div><span class="result-prompt">lithon</span><span class="result-caret">›</span> <strong>832040</strong> <small>· 9.45 ms</small></div>
+            </div>
+          </div>
+          <div class="floating-badge floating-badge--top">
+            <span class="badge-icon">⌁</span><span><b>x86-64</b><small>native output</small></span>
+          </div>
+          <div class="floating-badge floating-badge--bottom">
+            <span class="badge-icon badge-icon--warm">◈</span><span><b>0 dependencies</b><small>built from first principles</small></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Lithon highlights">
+        <div class="container signal-grid">
+          <div class="signal-item"><strong>01</strong><span>Static by design</span></div>
+          <div class="signal-item"><strong>02</strong><span>Native at runtime</span></div>
+          <div class="signal-item"><strong>03</strong><span>Open by default</span></div>
+          <div class="signal-item signal-item--accent">
+            <span>Built for the curious <span class="signal-arrow">↗</span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section container" id="engine">
+        <div class="section-intro reveal">
+          <p class="section-kicker">01 / The engine</p>
+          <h2>Python syntax.<br /><span>Closer to the metal.</span></h2>
+          <p class="section-description">
+            The expressiveness you know, with the overhead you don't. Lithon checks every type before execution so the hot
+            path stays clean, predictable, and fast.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-card--large reveal">
+            <div class="feature-topline"><span class="feature-index">01</span><span class="feature-tag">Verification</span></div>
+            <div class="feature-graphic type-graphic" aria-hidden="true">
+              <div class="type-node type-node--source">source</div>
+              <div class="type-connector"></div>
+              <div class="type-node type-node--verified"><span>✓</span> typed</div>
+              <div class="type-connector type-connector--short"></div>
+              <div class="type-chip">safe to run</div>
+            </div>
+            <h3>Every variable<br />has a proof.</h3>
+            <p>Static flow verification catches uncertainty before it reaches the machine. No hidden dynamic dispatch. No surprises at runtime.</p>
+            <a class="card-link" href="#architecture">See how it works <span>↗</span></a>
+          </article>
+          <article class="feature-card reveal reveal--delay">
+            <div class="feature-topline"><span class="feature-index">02</span><span class="feature-tag">Performance</span></div>
+            <div class="feature-graphic speed-graphic" aria-hidden="true">
+              <span class="speed-line speed-line--one"></span>
+              <span class="speed-line speed-line--two"></span>
+              <span class="speed-line speed-line--three"></span>
+              <span class="speed-core">9.45<small>ms</small></span>
+            </div>
+            <h3>Skip the warm-up.</h3>
+            <p>Native x86-64 instructions are emitted directly into executable memory. Fast from the first call.</p>
+            <a class="card-link" href="#quickstart">Read the quickstart <span>↗</span></a>
+          </article>
+          <article class="feature-card reveal reveal--delay-more">
+            <div class="feature-topline"><span class="feature-index">03</span><span class="feature-tag">Foundations</span></div>
+            <div class="feature-graphic layers-graphic" aria-hidden="true">
+              <span class="layer layer--back">Python</span>
+              <span class="layer layer--middle">C++20</span>
+              <span class="layer layer--front">x64</span>
+            </div>
+            <h3>Small core.<br />Big ambition.</h3>
+            <p>Built without LLVM or Cranelift. A focused engine where every layer has a clear job.</p>
+            <a class="card-link" href="#architecture">View the stack <span>↗</span></a>
+          </article>
+        </div>
+      </section>
+
+      <section class="architecture-section" id="architecture">
+        <div class="container architecture-layout">
+          <div class="architecture-copy reveal">
+            <p class="section-kicker">02 / Architecture</p>
+            <h2>Four layers.<br /><span>One clean path.</span></h2>
+            <p>
+              Each language does the work it is best at. Lithon moves from readable source to executable instructions
+              without dragging a heavyweight compiler stack behind it.
+            </p>
+            <a class="button button--outline" href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer"
+              >Read the source <span>↗</span></a
+            >
+          </div>
+          <div class="architecture-map reveal reveal--delay">
+            <div class="map-line--vertical"></div>
+            <div class="map-item map-item--python">
+              <span class="map-number">01</span><span class="map-icon">Py</span>
+              <div><strong>Frontend</strong><small>Python · expressive syntax</small></div><span class="map-arrow">↓</span>
+            </div>
+            <div class="map-item map-item--cpp">
+              <span class="map-number">02</span><span class="map-icon">C+</span>
+              <div><strong>Engine</strong><small>C++20 · static flow verifier</small></div><span class="map-arrow">↓</span>
+            </div>
+            <div class="map-item map-item--c">
+              <span class="map-number">03</span><span class="map-icon">C</span>
+              <div><strong>Bridge</strong><small>C · ABI alignment</small></div><span class="map-arrow">↓</span>
+            </div>
+            <div class="map-item map-item--asm">
+              <span class="map-number">04</span><span class="map-icon">↯</span>
+              <div><strong>Backend</strong><small>x64 · hand-encoded opcodes</small></div><span class="map-arrow map-arrow--last">✓</span>
+            </div>
+            <div class="map-output">
+              <span>output</span><strong>direct CPU execution</strong><span class="output-pulse"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="quickstart-section container" id="quickstart">
+        <div class="quickstart-card reveal">
+          <div class="quickstart-copy">
+            <p class="section-kicker">03 / Quickstart</p>
+            <h2>From clone<br />to <em>run</em>.</h2>
+            <p>Three commands. Zero dependency hunting. The fastest way to see Lithon’s promise for yourself.</p>
+            <a class="text-link" href="https://github.com/MotherOfProgrammers/Lithon#quickstart" target="_blank" rel="noreferrer"
+              >Read the full README <span>↗</span></a
+            >
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="terminal-dot"></span><span>terminal</span>
+              <button class="copy-button" type="button" aria-label="Copy the quickstart commands">copy</button>
+            </div>
+            <div class="terminal-body">
+              <div><span class="terminal-prompt">$</span> git clone https://github.com/MotherOfProgrammers/Lithon.git</div>
+              <div><span class="terminal-prompt">$</span> cd Lithon</div>
+              <div><span class="terminal-prompt">$</span> make -j$(nproc)</div>
+              <div class="terminal-output"><span class="output-check">✓</span> Lithon v1.0.0-beta <span>· x86-64 Native JIT</span></div>
+              <div class="terminal-output"><span class="output-check">✓</span> Static Flow Verifier: Passed <span>· 0 errors</span></div>
+              <div><span class="terminal-prompt">$</span> ./lithon run examples/fib.py</div>
+              <div class="terminal-result">Result: fib(30) = <strong>832040</strong></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="team-section container" id="team">
+        <div class="team-header reveal">
+          <div>
+            <p class="section-kicker">04 / The people</p>
+            <h2>Made by people<br /><span>who care about speed.</span></h2>
+          </div>
+          <p>Independent minds, one shared belief: the tools underneath our ideas should be as thoughtful as the ideas themselves.</p>
+        </div>
+        <div class="team-grid">
+          <article class="person-card person-card--featured reveal">
+            <div class="person-top"><span class="person-role">Pioneer · Lead developer</span><span class="person-number">01</span></div>
+            <div class="avatar avatar--tharusha" aria-hidden="true"><span>WR</span><i></i></div>
+            <h3>W.H. Tharusha<br />Rasanjana</h3>
+            <p>Building the core idea from first principles: a Python-flavored language with a direct line to native execution.</p>
+            <div class="social-links">
+              <a href="https://github.com/tharushaudana" target="_blank" rel="noreferrer" aria-label="Tharusha on GitHub">GH</a>
+              <a href="https://linkedin.com/in/tharusha-rasanjana-b7420a281" target="_blank" rel="noreferrer" aria-label="Tharusha on LinkedIn">in</a>
+              <a href="https://www.instagram.com/explore/search/keyword/?q=Tharusha%20Rasanjana" target="_blank" rel="noreferrer" aria-label="Search for Tharusha on Instagram">ig</a>
+              <a href="https://www.youtube.com/results?search_query=Tharusha+Rasanjana" target="_blank" rel="noreferrer" aria-label="Search for Tharusha on YouTube">yt</a>
+            </div>
+          </article>
+          <article class="person-card reveal reveal--delay">
+            <div class="person-top"><span class="person-role">Core developer</span><span class="person-number">02</span></div>
+            <div class="avatar avatar--tenuka" aria-hidden="true"><span>TO</span><i></i></div>
+            <h3>Tenuka<br />Omaljith</h3>
+            <p>Helping shape the sharp the FrontEnd of Lithon, making it intuitive and powerful.</p>
+            <div class="social-links">
+              <a href="https://github.com/Tenuka22" target="_blank" rel="noreferrer" aria-label="Tenuka on GitHub">GH</a>
+              <a href="https://www.linkedin.com/search/results/people/?keywords=Tenuka%20Omaljith" target="_blank" rel="noreferrer" aria-label="Search for Tenuka on LinkedIn">in</a>
+              <a href="https://www.instagram.com/tenuka22" target="_blank" rel="noreferrer" aria-label="Tenuka on Instagram">ig</a>
+              <a href="https://www.youtube.com/results?search_query=Tenuka+Omaljith" target="_blank" rel="noreferrer" aria-label="Search for Tenuka on YouTube">yt</a>
+            </div>
+          </article>
+          <article class="person-card reveal reveal--delay-more">
+            <div class="person-top"><span class="person-role">Core developer</span><span class="person-number">03</span></div>
+            <div class="avatar avatar--nadila" aria-hidden="true"><span>NY</span><i></i></div>
+            <h3>Nadila<br />Yendinu</h3>
+            <p>Bringing a careful eye to the details that make a powerful framework feel clear, approachable, and open.</p>
+            <div class="social-links">
+              <a href="https://github.com/nadilayendinu" target="_blank" rel="noreferrer" aria-label="Nadila on GitHub">GH</a>
+              <a href="https://www.linkedin.com/search/results/people/?keywords=Nadila%20Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on LinkedIn">in</a>
+              <a href="https://www.instagram.com/explore/search/keyword/?q=Nadila%20Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on Instagram">ig</a>
+              <a href="https://www.youtube.com/results?search_query=Nadila+Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on YouTube">yt</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="closing-section container reveal">
+        <div class="closing-mark" aria-hidden="true"><span></span></div>
+        <p class="section-kicker">The next instruction is yours</p>
+        <h2>Make something<br /><em>unreasonably fast.</em></h2>
+        <a class="button button--primary" href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer"
+          >Visit Lithon on GitHub <span class="button-arrow">↗</span></a
+        >
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="#main">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="scripts/home.js"></script>
+  </body>
+</html>

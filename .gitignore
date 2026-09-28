@@ -15,6 +15,7 @@ compile_commands.json
 
 .vscode/
 .idea/
+docs/public/node_modules/
 
 *.log
 

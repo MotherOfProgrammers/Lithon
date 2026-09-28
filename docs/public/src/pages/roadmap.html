@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Lithon roadmap and evolution tracker | public milestones for the engine." />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Roadmap | Lithon" />
+    <meta property="og:description" content="Lithon evolves in public. Follow the movement from a sharp native core to a language and runtime more people can build with." />
+    <meta name="twitter:card" content="summary" />
+    <title>Roadmap | Lithon</title>
+    <link rel="icon" href="../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/pages/inner-pages.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="../index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="../index.html#engine">The engine</a>
+          <a href="docs.html">Docs</a>
+          <a href="use-cases.html">Use cases</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero">
+        <div class="container reveal">
+          <p class="section-kicker">03 / Roadmap &amp; evolution tracker</p>
+          <h1>Same bloodline.<br /><em>New expression.</em></h1>
+          <p class="page-hero-lede">
+            Lithon evolves in public. Follow the movement from a sharp native core to a language and runtime that more
+            people can build with.
+          </p>
+          <div class="page-hero-meta">
+            <span>Public milestones</span><span>Open contribution</span><span>Long horizon</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-content container">
+        <div class="tracker-head reveal">
+          <div>
+            <p class="section-kicker">Current state</p>
+            <h2>Evolution<br /><span>in motion.</span></h2>
+          </div>
+          <p>
+            The tracker is a product surface, not a promise of fixed dates. Each step keeps the same standard:
+            understandability, speed, and a small core.
+          </p>
+        </div>
+
+        <div class="progress-card reveal">
+          <strong>42%</strong><span>toward the next stable line</span>
+          <div class="progress-track"><i></i></div>
+          <span>v1.0.0-beta</span>
+        </div>
+
+        <div class="roadmap-filter" role="group" aria-label="Filter milestones by status">
+          <button class="is-selected" type="button" data-roadmap-filter="all" aria-pressed="true">All</button>
+          <button type="button" data-roadmap-filter="done" aria-pressed="false">Complete</button>
+          <button type="button" data-roadmap-filter="next" aria-pressed="false">Next</button>
+        </div>
+        <p class="visually-hidden" role="status" data-roadmap-live></p>
+
+        <div class="roadmap-list">
+          <article class="roadmap-item is-done reveal" data-roadmap-status="done">
+            <span class="roadmap-marker" aria-hidden="true">✓</span>
+            <div class="roadmap-date">Past · 01</div>
+            <div>
+              <h3>Prove the core.</h3>
+              <p>
+                Establish the static flow verifier, typed AST blocks, and a native x86-64 emitter with no heavyweight
+                compiler dependency.
+              </p>
+              <div class="roadmap-tags"><span>C++20</span><span>Static analysis</span><span>x86-64</span></div>
+            </div>
+          </article>
+          <article class="roadmap-item is-done reveal" data-roadmap-status="done">
+            <span class="roadmap-marker" aria-hidden="true">✓</span>
+            <div class="roadmap-date">Now · 02</div>
+            <div>
+              <h3>Make the path visible.</h3>
+              <p>
+                Document the architecture, publish examples, and give contributors a clear place to see what is happening
+                under the syntax.
+              </p>
+              <div class="roadmap-tags"><span>Docs</span><span>Examples</span><span>Community</span></div>
+            </div>
+          </article>
+          <article class="roadmap-item reveal" data-roadmap-status="next">
+            <span class="roadmap-marker" aria-hidden="true">03</span>
+            <div class="roadmap-date">Next · 03</div>
+            <div>
+              <h3>Broaden the language.</h3>
+              <p>
+                Expand supported expressions, improve diagnostics, and make the typed surface feel natural for more real
+                workloads.
+              </p>
+              <div class="roadmap-tags"><span>Diagnostics</span><span>Type flow</span><span>Tooling</span></div>
+            </div>
+          </article>
+          <article class="roadmap-item reveal" data-roadmap-status="next">
+            <span class="roadmap-marker" aria-hidden="true">04</span>
+            <div class="roadmap-date">Later · 04</div>
+            <div>
+              <h3>Bring the wings further.</h3>
+              <p>
+                Explore more targets, richer tooling, and the ergonomics required for Lithon to move from an engine into a
+                daily language.
+              </p>
+              <div class="roadmap-tags"><span>Targets</span><span>Editor support</span><span>Runtime</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="../index.html">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="../scripts/roadmap.js"></script>
+  </body>
+</html>
