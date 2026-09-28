@@ -1,0 +1,19 @@
+name: Auto Assign Pull Request
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign Pull Request
+        uses: toymachiner62/auto-assign-action@v1.0.1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          assignees: MotherOfProgrammers
