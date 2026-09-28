@@ -1,3 +1,4 @@
+import { initCodeEditor } from "./code-editor.js";
 import { qs, qsa } from "./dom.js";
 import { initSite } from "./site.js";
 
@@ -120,10 +121,16 @@ function initPlayground(): void {
   const runButton = qs<HTMLButtonElement>("#run-code");
   const editorName = qs("[data-editor-name]");
   const exampleList = qs<HTMLUListElement>("#example-list");
+  const highlight = qs<HTMLElement>(".editor-highlight code");
+  const suggestions = qs<HTMLElement>(".suggestions");
   const tabButtons = qsa<HTMLButtonElement>("[data-tab]");
   const panels = qsa<HTMLElement>("[data-panel]");
 
   if (editor === null || output === null) return;
+
+  if (highlight !== null && suggestions !== null) {
+    initCodeEditor({ textarea: editor, highlight, suggestions, status: null });
+  }
 
   const setState = (label: string, busy: boolean): void => {
     if (stateLabel !== null) stateLabel.textContent = label;
@@ -240,6 +247,9 @@ function initPlayground(): void {
 
       button.addEventListener("click", () => {
         editor.value = example.code;
+        // The highlighter owns the overlay, so a programmatic value change has
+        // to be pushed through it or the colours fall out of sync with the text.
+        editor.dispatchEvent(new Event("input"));
         if (editorName !== null) editorName.textContent = `${example.id}.lithon`;
         selectTab("code");
         editor.focus();

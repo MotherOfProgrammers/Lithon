@@ -17,6 +17,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/landing-hero.png" alt="Lithon docs landing page" width="900" />
+</p>
+
+---
+
 ## 🚀 What is Lithon?
 
 Lithon is a **zero-dependency, dual-tier execution engine** for a statically verified, Python-flavored language built for bare-metal performance.

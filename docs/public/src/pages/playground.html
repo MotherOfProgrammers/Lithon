@@ -11,6 +11,8 @@
     <meta name="twitter:card" content="summary" />
     <title>Playground | Lithon</title>
     <link rel="icon" href="../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../../fonts/fonts.css" />
     <link rel="stylesheet" href="../styles/base.css" />
     <link rel="stylesheet" href="../styles/pages/inner-pages.css" />
     <script>
@@ -89,6 +91,16 @@
               />
             </svg>
           </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
           <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
             <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4.25" />
@@ -156,12 +168,30 @@
             <div class="editor-bar">
               <span data-editor-name>scratch.lithon</span><span>Python-flavored</span>
             </div>
-            <textarea id="code-editor" aria-label="Lithon source code" spellcheck="false">def fib(n: int) -> int:
+            <div class="editor-surface">
+              <pre class="editor-highlight" aria-hidden="true"><code></code></pre>
+              <div class="suggestions" hidden></div>
+              <textarea
+                id="code-editor"
+                aria-label="Lithon source code"
+                aria-describedby="editor-help"
+                aria-autocomplete="list"
+                aria-controls="editor-suggestions"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+              >def fib(n: int) -&gt; int:
     if n &lt; 2:
         return n
     return fib(n - 1) + fib(n - 2)
 
 print(fib(10))</textarea>
+            </div>
+            <p class="visually-hidden" id="editor-help">
+              Python-flavored editor. Tab indents, Shift+Tab outdents, and typing shows keyword, builtin, and type suggestions.
+            </p>
+            <div id="editor-suggestions" class="visually-hidden" role="status" aria-live="polite"></div>
           </section>
 
           <section
@@ -218,6 +248,25 @@ print(fib(10))</textarea>
       </div>
     </footer>
 
+    <script>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("is-ready");
+        var blocks = document.querySelectorAll(".reveal");
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof IntersectionObserver !== "function") {
+          for (var i = 0; i < blocks.length; i += 1) blocks[i].classList.add("is-visible");
+          return;
+        }
+        var observer = new IntersectionObserver(function (entries) {
+          for (var n = 0; n < entries.length; n += 1) {
+            if (!entries[n].isIntersecting) continue;
+            entries[n].target.classList.add("is-visible");
+            observer.unobserve(entries[n].target);
+          }
+        }, { rootMargin: "0px 0px -6% 0px", threshold: 0.05 });
+        for (var j = 0; j < blocks.length; j += 1) observer.observe(blocks[j]);
+      })();
+    </script>
     <script type="module" src="../scripts/playground.js"></script>
   </body>
 </html>

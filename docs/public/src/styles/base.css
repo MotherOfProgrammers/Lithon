@@ -4,19 +4,41 @@
   --cream: #fcffeb;
   --lemon: #fafac6;
   --peach: #fecdaa;
-  --peach-deep: #b45a16;
+  /* Deep peach, used on the light accent surfaces (lemon, peach). Darkened from
+     #b45a16 so it clears 4.5:1 on the lemon card, not just 4.43:1. */
+  --peach-deep: #a8500f;
+  /* Accent that sits on the page background, and flips with the theme so it
+     always clears 4.5:1. --peach-deep stays the fixed brand color for the
+     light accent surfaces (lemon, peach) it was drawn against. */
+  --accent: #a8500f;
   --on-accent: #2f2b3a;
   --border: rgba(71, 67, 80, 0.14);
   --border-strong: rgba(71, 67, 80, 0.27);
-  --shadow: 0 24px 70px rgba(71, 67, 80, 0.11);
+  /* Lemon and peach are light brand surfaces: they do not flip with the theme.
+     Rings drawn on them use this fixed tint, never the theme's --border-strong,
+     which in dark mode is a white halo on a pale chip. */
+  --border-on-accent: rgba(71, 67, 80, 0.27);
+  --shadow: 0 12px 28px -16px rgba(71, 67, 80, 0.3);
   --shadow-hard: #474350;
-  --focus-ring: #b45a16;
+  --focus-ring: #a8500f;
   --code-bg: #474350;
   --code-fg: #f8fff4;
   --code-line: rgba(248, 255, 244, 0.18);
+  --code-string: #1f6b52;
   --surface: color-mix(in srgb, var(--cream) 55%, transparent);
   --surface-solid: var(--cream);
   --header-height: 86px;
+  /* Secondary text tints from the ink hue rather than sitting at a low
+     opacity, so it holds 4.5:1 on every surface it lands on. */
+  --ink-muted: #625f69;
+  --ink-faint: #6a6971;
+  --on-accent-muted: #6b3a0d;
+  /* Legibility floors. Functional text never drops below 11px; non-interactive
+     micro-labels may sit at 10px. */
+  --text-micro: 10px;
+  --text-ui: 11px;
+  --text-ui-lg: 12px;
+  --text-nav: 13px;
   --mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -26,14 +48,21 @@
 html[data-theme="dark"] {
   --ink: #f8fff4;
   --paper: #474350;
+  --ink-muted: #d5d9d3;
+  --ink-faint: #ccd0cb;
+  --on-accent-muted: #6b3a0d;
+  /* The deep peach is a dark-mode failure: on the dark paper it lands at 2.0:1.
+     Dark mode carries a light peach accent instead, which reads at 6.7:1. */
+  --accent: #fecdaa;
   --border: rgba(248, 255, 244, 0.16);
   --border-strong: rgba(248, 255, 244, 0.3);
-  --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  --shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.55);
   --shadow-hard: #1f1c26;
   --focus-ring: #fecdaa;
   --code-bg: #26232d;
   --code-fg: #f8fff4;
   --code-line: rgba(248, 255, 244, 0.14);
+  --code-string: #a8e6c0;
   --surface: color-mix(in srgb, #ffffff 7%, transparent);
   --surface-solid: color-mix(in srgb, #ffffff 12%, var(--paper));
   color-scheme: dark;
@@ -43,14 +72,19 @@ html[data-theme="dark"] {
   html:not([data-theme]) {
     --ink: #f8fff4;
     --paper: #474350;
+    --ink-muted: #d5d9d3;
+    --ink-faint: #ccd0cb;
+    --on-accent-muted: #6b3a0d;
+    --accent: #fecdaa;
     --border: rgba(248, 255, 244, 0.16);
     --border-strong: rgba(248, 255, 244, 0.3);
-    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    --shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.55);
     --shadow-hard: #1f1c26;
     --focus-ring: #fecdaa;
     --code-bg: #26232d;
     --code-fg: #f8fff4;
     --code-line: rgba(248, 255, 244, 0.14);
+  --code-string: #a8e6c0;
     --surface: color-mix(in srgb, #ffffff 7%, transparent);
     --surface-solid: color-mix(in srgb, #ffffff 12%, var(--paper));
     color-scheme: dark;
@@ -80,24 +114,26 @@ body {
 h1, h2, h3, h4, p, figure, blockquote, pre { margin-top: 0; }
 
 h1 {
-  font-size: clamp(58px, 8.2vw, 113px);
-  line-height: 0.89;
-  letter-spacing: -0.095em;
+  font-size: clamp(44px, 5.6vw, 72px);
+  line-height: 0.94;
+  letter-spacing: -0.035em;
   font-weight: 800;
+  text-wrap: balance;
 }
 
 h2 {
-  font-size: clamp(40px, 5.2vw, 70px);
-  line-height: 0.98;
-  letter-spacing: -0.075em;
+  font-size: clamp(34px, 4vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.03em;
   font-weight: 800;
+  text-wrap: balance;
   margin-bottom: 0;
 }
 
 h3 { font-weight: 700; }
 
-h1 em, h2 em { color: var(--peach-deep); font-style: normal; }
-h2 span { color: var(--peach-deep); }
+h1 em, h2 em { color: var(--accent); font-style: normal; }
+h2 span { color: var(--accent); }
 
 img, svg, video { display: block; max-width: 100%; }
 
@@ -139,7 +175,7 @@ textarea { color: inherit; font: inherit; cursor: text; }
   padding: 10px 16px;
   background: var(--ink);
   color: var(--paper);
-  font: 11px var(--mono);
+  font: var(--text-ui)/1.4 var(--mono);
   transform: translateY(-250%);
   transition: transform 0.2s var(--ease);
 }
@@ -153,8 +189,8 @@ textarea { color: inherit; font: inherit; cursor: text; }
 [hidden] { display: none !important; }
 
 .section-kicker {
-  color: var(--peach-deep);
-  font: 10px var(--mono);
+  color: var(--accent);
+  font: var(--text-ui)/1 var(--mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin: 0 0 26px;
@@ -167,31 +203,56 @@ textarea { color: inherit; font: inherit; cursor: text; }
   gap: 28px;
   border: 1px solid var(--ink);
   padding: 15px 17px 15px 21px;
-  font: 11px var(--mono);
+  font: var(--text-ui-lg)/1 var(--mono);
   transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
 .button:hover { transform: translateY(-1px); box-shadow: 3px 3px 0 var(--shadow-hard); }
 .button--primary { background: var(--ink); color: var(--paper); }
-.button--primary:hover { background: var(--peach); border-color: var(--ink); color: var(--on-accent); }
+.button--primary:hover { background: var(--peach); border-color: var(--on-accent); color: var(--on-accent); }
 .button-arrow { font-size: 16px; line-height: 10px; }
 .button--outline { border-color: var(--border-strong); margin-top: 29px; gap: 24px; }
-.button--outline:hover { background: var(--lemon); color: var(--on-accent); border-color: var(--ink); }
+.button--outline:hover { background: var(--lemon); color: var(--on-accent); border-color: var(--on-accent); }
 
 .text-link, .card-link {
-  font: 11px var(--mono);
+  font: var(--text-ui-lg)/1.4 var(--mono);
   border-bottom: 1px solid var(--border-strong);
   padding-bottom: 5px;
   transition: color 0.25s ease, border-color 0.25s ease;
 }
 
 .text-link span, .card-link span { margin-left: 9px; font-size: 14px; }
-.text-link:hover, .card-link:hover { color: var(--peach-deep); border-color: var(--peach-deep); }
+.text-link:hover, .card-link:hover { color: var(--accent); border-color: var(--accent); }
 
-.js .reveal { opacity: 1; transform: none; transition: none; }
-.js .reveal--delay { transition-delay: 0s; }
-.js .reveal--delay-more { transition-delay: 0s; }
-.js .reveal.is-visible { opacity: 1; transform: none; }
+/* ---- Initial motion -------------------------------------------------------
+   Under .js the page starts poised, then the inline boot at the end of each
+   page marks the document ready and releases the blocks already on screen as
+   soon as the markup is parsed, so the first screen never waits on the module
+   bundle. If JS never boots, the head fallback strips .js after 1.5s and
+   everything is simply visible, so motion can never withhold content. */
+
+html.js .reveal {
+  opacity: 0;
+  transition: opacity 0.7s var(--ease);
+}
+html.js .reveal.is-visible { opacity: 1; }
+
+/* Each direct child slides up into place, staggered by position in the block.
+   --enter-base lets a delayed block push its whole cascade back in step. */
+html.js .reveal { --enter-base: 0s; --enter-step: 0.07s; }
+html.js .reveal--delay { --enter-base: 0.1s; }
+html.js .reveal--delay-more { --enter-base: 0.2s; }
+html.js .reveal > * {
+  translate: 0 18px;
+  transition: translate 0.7s var(--ease);
+  transition-delay: var(--enter-base);
+}
+html.js .reveal.is-visible > * { translate: 0 0; }
+html.js .reveal.is-visible > *:nth-child(2) { transition-delay: calc(var(--enter-base) + var(--enter-step)); }
+html.js .reveal.is-visible > *:nth-child(3) { transition-delay: calc(var(--enter-base) + var(--enter-step) * 2); }
+html.js .reveal.is-visible > *:nth-child(4) { transition-delay: calc(var(--enter-base) + var(--enter-step) * 3); }
+html.js .reveal.is-visible > *:nth-child(5) { transition-delay: calc(var(--enter-base) + var(--enter-step) * 4); }
+html.js .reveal.is-visible > *:nth-child(6) { transition-delay: calc(var(--enter-base) + var(--enter-step) * 5); }
 
 .site-header {
   position: fixed;
@@ -201,8 +262,11 @@ textarea { color: inherit; font: inherit; cursor: text; }
   width: 100%;
   background: color-mix(in srgb, var(--paper) 80%, transparent);
   border-bottom: 1px solid transparent;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, opacity 0.5s var(--ease), translate 0.5s var(--ease);
 }
+
+html.js:not(.is-ready) .site-header { opacity: 0; translate: 0 -14px; }
+html.js.is-ready .site-header { opacity: 1; translate: 0 0; }
 
 .site-header.is-scrolled { border-color: var(--border); }
 
@@ -214,9 +278,16 @@ textarea { color: inherit; font: inherit; cursor: text; }
   gap: 25px;
 }
 
-.brand { display: inline-flex; align-items: center; gap: 11px; width: max-content; }
-.brand-name { font-size: 20px; font-weight: 800; letter-spacing: -0.07em; }
-.brand-dot { color: var(--peach-deep); }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  width: max-content;
+}
+html.js:not(.is-ready) .site-header .brand { opacity: 0; translate: 0 -8px; }
+html.js.is-ready .site-header .brand { animation: nav-drop 0.5s var(--ease) 0.05s backwards; }
+.brand-name { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
+.brand-dot { color: var(--accent); }
 
 .boa-mark { width: 31px; height: 31px; overflow: visible; transform: rotate(-12deg); }
 .boa-mark__coil { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -225,35 +296,112 @@ textarea { color: inherit; font: inherit; cursor: text; }
 
 .nav-links { display: flex; align-items: center; gap: 25px; margin-left: auto; }
 
+/* Nav items are primary navigation, not micro-labels: they carry a real
+   reading size and enough tap height to be usable. */
 .nav-links a, .footer-links a {
-  font: 10px var(--mono);
-  letter-spacing: 0.02em;
-  opacity: 0.68;
-  transition: color 0.25s ease, opacity 0.25s ease;
+  font: var(--text-nav)/1.4 var(--mono);
+  letter-spacing: 0.01em;
+  color: var(--ink-muted);
+  transition: color 0.25s ease;
 }
 
+.nav-links a { padding: 10px 0; }
+
+html.js:not(.is-ready) .site-header .nav-links a { opacity: 0; translate: 0 -8px; }
+html.js.is-ready .site-header .nav-links a { animation: nav-drop 0.5s var(--ease) backwards; }
+html.js.is-ready .site-header .nav-links a:nth-child(1) { animation-delay: 0.12s; }
+html.js.is-ready .site-header .nav-links a:nth-child(2) { animation-delay: 0.17s; }
+html.js.is-ready .site-header .nav-links a:nth-child(3) { animation-delay: 0.22s; }
+html.js.is-ready .site-header .nav-links a:nth-child(4) { animation-delay: 0.27s; }
+html.js.is-ready .site-header .nav-links a:nth-child(5) { animation-delay: 0.32s; }
+
 .nav-links a:hover, .nav-links a.is-active, .footer-links a:hover {
-  color: var(--peach-deep);
-  opacity: 1;
+  color: var(--accent);
 }
 
 .nav-actions { display: flex; gap: 8px; align-items: center; }
 
 .icon-button, .menu-toggle {
   position: relative;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
   background: transparent;
-  transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+  transition:
+    background 0.28s var(--ease), border-color 0.28s var(--ease), color 0.28s var(--ease),
+    translate 0.4s var(--ease), scale 0.3s var(--ease), box-shadow 0.4s var(--ease);
 }
 
-.icon-button:hover, .menu-toggle:hover { background: var(--lemon); border-color: var(--border-strong); transform: translateY(-2px); }
-.icon-button svg { width: 15px; height: 15px; fill: var(--ink); stroke: var(--ink); stroke-width: 1.6; }
+html.js:not(.is-ready) .site-header .nav-actions > * { opacity: 0; translate: 0 -8px; }
+html.js.is-ready .site-header .nav-actions > * { animation: nav-drop 0.5s var(--ease) backwards; }
+html.js.is-ready .site-header .nav-actions > *:nth-child(1) { animation-delay: 0.3s; }
+html.js.is-ready .site-header .nav-actions > *:nth-child(2) { animation-delay: 0.35s; }
+html.js.is-ready .site-header .nav-actions > *:nth-child(3) { animation-delay: 0.4s; }
+html.js.is-ready .site-header .nav-actions > *:nth-child(4) { animation-delay: 0.45s; }
+
+@keyframes nav-drop {
+  from { opacity: 0; translate: 0 -8px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+/* The halo is drawn outside the button so the hover reads as a lift plus a
+   ring, not just a colour swap. It doubles as the state-change ping. */
+.icon-button::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  opacity: 0;
+  scale: 0.8;
+  transition: opacity 0.3s var(--ease), scale 0.5s var(--ease);
+  pointer-events: none;
+}
+
+/* Hover and active swap in the light brand surfaces, so the glyph must swap to
+   the fixed dark tints too: --ink follows the theme and would put a near-white
+   glyph on the lemon chip (1.05:1) in dark mode. */
+.icon-button:hover, .menu-toggle:hover {
+  background: var(--lemon);
+  border-color: var(--border-on-accent);
+  color: var(--on-accent);
+  translate: 0 -2px;
+  box-shadow: 0 9px 16px -11px var(--shadow-hard);
+}
+.icon-button:hover::before, .menu-toggle:hover::before { opacity: 1; scale: 1; }
+.icon-button:active {
+  background: var(--peach);
+  border-color: var(--border-on-accent);
+  color: var(--on-accent);
+  scale: 0.94;
+  translate: 0 0;
+  box-shadow: none;
+}
+.icon-button svg { width: 15px; height: 15px; scale: 1; transition: scale 0.4s var(--ease); }
+.icon-button:hover svg { scale: 1.16; }
+
+@keyframes control-ping {
+  0% { opacity: 0.9; scale: 0.85; }
+  70% { opacity: 0.35; }
+  100% { opacity: 0; scale: 1.75; }
+}
+
+/* Two icon systems share this slot. The brand marks (GitHub, Discord) are solid
+   filled paths, so they must never also take a stroke — outlining a filled
+   glyph fattens it and closes its counters. Only the line-drawn icons
+   (theme, sound) are stroked. */
+.icon-button svg:not([class]) { fill: currentColor; stroke: none; }
+.icon-button svg[class] {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .icon-button[data-tooltip]::after {
   content: attr(data-tooltip);
@@ -265,7 +413,7 @@ textarea { color: inherit; font: inherit; cursor: text; }
   border-radius: 4px;
   background: var(--ink);
   color: var(--paper);
-  font: 9px var(--mono);
+  font: var(--text-micro)/1.2 var(--mono);
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
@@ -275,20 +423,37 @@ textarea { color: inherit; font: inherit; cursor: text; }
 .icon-button[data-tooltip]:hover::after,
 .icon-button[data-tooltip]:focus-visible::after { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-.theme-toggle svg { width: 15px; height: 15px; fill: none; stroke: var(--ink); stroke-linecap: round; stroke-width: 1.6; }
+.icon-button { color: var(--ink); }
 .theme-toggle .moon-icon { display: none; }
 [data-theme="dark"] .theme-toggle .sun-icon { display: none; }
 [data-theme="dark"] .theme-toggle .moon-icon { display: block; }
 
+/* Sound is off by default, so the muted glyph is the resting state. When it is
+   on the button wears a persistent peach chip: a glyph tint alone was too easy
+   to miss, and the lemon hover chip used to erase the on/off distinction. */
+.sound-toggle .sound-off-icon { display: none; }
+.sound-toggle:not(.is-on) .sound-on-icon { display: none; }
+.sound-toggle:not(.is-on) .sound-off-icon { display: block; }
+.sound-toggle.is-on,
+.sound-toggle.is-on:hover,
+.sound-toggle.is-on:active {
+  background: var(--peach);
+  border-color: var(--border-on-accent);
+  color: var(--on-accent);
+}
+.sound-toggle.is-on::before { border-color: color-mix(in srgb, var(--peach) 75%, transparent); }
+.sound-toggle.is-pinging::before { animation: control-ping 0.6s var(--ease); }
+
 .menu-toggle { display: none; border: 0; border-radius: 0; gap: 5px; }
-.menu-toggle span { width: 18px; height: 1px; display: block; background: var(--ink); transform-origin: center; transition: transform 0.25s var(--ease); }
+.menu-toggle span { width: 18px; height: 1px; display: block; background: var(--ink); transform-origin: center; transition: transform 0.25s var(--ease), background 0.28s var(--ease); }
+.menu-toggle:hover span { background: var(--on-accent); }
 .menu-toggle[aria-expanded="true"] span:first-child { transform: translateY(3px) rotate(45deg); }
 .menu-toggle[aria-expanded="true"] span:last-child { transform: translateY(-3px) rotate(-45deg); }
 
 .footer { border-top: 1px solid var(--border); }
 .footer-inner { min-height: 90px; display: flex; align-items: center; justify-content: space-between; gap: 25px; }
-.footer-copy { font: 10px var(--mono); opacity: 0.6; }
-.footer-copy span { display: inline-block; margin-left: 15px; opacity: 0.65; }
+.footer-copy { font: var(--text-ui)/1.6 var(--mono); color: var(--ink-muted); }
+.footer-copy span { display: inline-block; margin-left: 15px; color: var(--ink-faint); }
 .footer-links { display: flex; flex-wrap: wrap; gap: 24px; }
 
 @media (max-width: 900px) {
@@ -303,7 +468,7 @@ textarea { color: inherit; font: inherit; cursor: text; }
     top: var(--header-height);
     left: 18px;
     right: 18px;
-    padding: 13px;
+    padding: 8px;
     display: none;
     flex-direction: column;
     align-items: stretch;
@@ -342,7 +507,16 @@ textarea { color: inherit; font: inherit; cursor: text; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
-  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  html.js .reveal, html.js .reveal.is-visible { opacity: 1; transition: none; }
+  html.js .reveal > *, html.js .reveal.is-visible > * { translate: none; transition: none; }
+  /* The entrance rules carry an extra .is-ready class, so these overrides need
+     !important to win: without it the nav sits behind its animation delay and
+     stays invisible for the best part of a second. */
+  html.js .site-header,
+  html.js .site-header .brand,
+  html.js .site-header .nav-links a,
+  html.js .site-header .nav-actions > * { opacity: 1 !important; translate: none !important; animation: none !important; }
+  .icon-button, .icon-button svg, .icon-button:hover, .icon-button:hover svg { translate: none; scale: none; box-shadow: none; transition: none; }
   .hero-glow, .site-header, .button, .floating-badge, .feature-card, .person-card { filter: none !important; }
 }

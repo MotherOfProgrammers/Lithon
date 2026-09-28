@@ -17,6 +17,8 @@
     <meta name="twitter:card" content="summary" />
     <title>Lithon | Not a revolution but an evolution of the same bloodline</title>
     <link rel="icon" href="../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../fonts/fonts.css" />
     <link rel="stylesheet" href="styles/base.css" />
     <link rel="stylesheet" href="styles/pages/home.css" />
     <script>
@@ -95,6 +97,16 @@
               />
             </svg>
           </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
           <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
             <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4.25" />
@@ -182,10 +194,22 @@
             </div>
           </div>
           <div class="floating-badge floating-badge--top">
-            <span class="badge-icon">⌁</span><span><b>x86-64</b><small>native output</small></span>
+            <span class="badge-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="7" y="7" width="10" height="10" rx="1.5" />
+                <path d="M4 4h3M4 4v3M20 4h-3M20 4v3M4 20h3M4 20v-3M20 20h-3M20 20v-3" />
+              </svg>
+            </span>
+            <span><b>x86-64</b><small>native output</small></span>
           </div>
           <div class="floating-badge floating-badge--bottom">
-            <span class="badge-icon badge-icon--warm">◈</span><span><b>0 dependencies</b><small>built from first principles</small></span>
+            <span class="badge-icon badge-icon--warm" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z" />
+                <path d="m4 7 8 4 8-4M12 11v10" />
+              </svg>
+            </span>
+            <span><b>0 dependencies</b><small>built from first principles</small></span>
           </div>
         </div>
       </section>
@@ -397,6 +421,25 @@
       </div>
     </footer>
 
+    <script>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("is-ready");
+        var blocks = document.querySelectorAll(".reveal");
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof IntersectionObserver !== "function") {
+          for (var i = 0; i < blocks.length; i += 1) blocks[i].classList.add("is-visible");
+          return;
+        }
+        var observer = new IntersectionObserver(function (entries) {
+          for (var n = 0; n < entries.length; n += 1) {
+            if (!entries[n].isIntersecting) continue;
+            entries[n].target.classList.add("is-visible");
+            observer.unobserve(entries[n].target);
+          }
+        }, { rootMargin: "0px 0px -6% 0px", threshold: 0.05 });
+        for (var j = 0; j < blocks.length; j += 1) observer.observe(blocks[j]);
+      })();
+    </script>
     <script type="module" src="scripts/home.js"></script>
   </body>
 </html>
