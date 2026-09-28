@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Lithon use cases and case studies | Real-world applications of the Lithon engine." />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Use cases | Lithon" />
+    <meta property="og:description" content="Speed where the work matters: predictable typed execution for low-latency services, native tooling, and research." />
+    <meta name="twitter:card" content="summary" />
+    <title>Use cases | Lithon</title>
+    <link rel="icon" href="../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/pages/inner-pages.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="../index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="../index.html#engine">The engine</a>
+          <a href="docs.html">Docs</a>
+          <a href="use-cases.html">Use cases</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero">
+        <div class="container reveal">
+          <p class="section-kicker">02 / Use cases &amp; case studies</p>
+          <h1>Speed where<br /><em>the work</em> matters.</h1>
+          <p class="page-hero-lede">
+            Lithon is for the parts of a system where predictable execution, tiny startup overhead, and control over the
+            machine are worth designing for.
+          </p>
+          <div class="page-hero-meta">
+            <span>Low-latency services</span><span>Native tooling</span><span>Research &amp; learning</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-content container">
+        <div class="tracker-head reveal">
+          <div>
+            <p class="section-kicker">Case studies</p>
+            <h2>Small stories.<br /><span>Real constraints.</span></h2>
+          </div>
+          <p>
+            These are the kinds of problems Lithon is shaped to meet: systems that need a clear performance story without
+            inheriting a massive toolchain.
+          </p>
+        </div>
+
+        <div class="case-grid">
+          <article class="case-card case-card--feature reveal">
+            <div class="case-type"><span>Case 01</span><span>Signal processing</span></div>
+            <h2>When every millisecond has a destination.</h2>
+            <p>
+              A typed, low-latency data path can turn a prototype into a dependable edge workload—without adding an
+              interpreter to the critical loop.
+            </p>
+            <div class="case-metric"><strong>&lt; 1ms</strong><span>target startup overhead</span></div>
+          </article>
+          <article class="case-card case-card--peach reveal reveal--delay">
+            <div class="case-type"><span>Case 02</span><span>Developer tools</span></div>
+            <h3>Build tools that explain themselves.</h3>
+            <p>Static flow makes performance decisions visible instead of hiding them behind runtime magic.</p>
+            <a class="case-link" href="playground.html">Try the path ↗</a>
+          </article>
+          <article class="case-card reveal reveal--delay-more">
+            <div class="case-type"><span>Case 03</span><span>Embedded systems</span></div>
+            <h3>Keep the runtime close.</h3>
+            <p>
+              Zero external dependencies make Lithon a useful direction for environments where the toolchain is part of the
+              product.
+            </p>
+            <a class="case-link" href="roadmap.html">See the evolution ↗</a>
+          </article>
+        </div>
+
+        <div class="use-case-grid">
+          <article class="use-card reveal">
+            <span class="use-icon" aria-hidden="true">⌁</span>
+            <h3>Low-latency services</h3>
+            <p>Predictable typed paths for work that cannot wait for warm-up.</p>
+          </article>
+          <article class="use-card reveal reveal--delay">
+            <span class="use-icon" aria-hidden="true">▣</span>
+            <h3>Native utilities</h3>
+            <p>Small focused tools with no dependency chain to babysit.</p>
+          </article>
+          <article class="use-card reveal reveal--delay-more">
+            <span class="use-icon" aria-hidden="true">◈</span>
+            <h3>Learning compilers</h3>
+            <p>A transparent architecture for people who want to understand the machine.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="../index.html">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="../scripts/site.js"></script>
+  </body>
+</html>
