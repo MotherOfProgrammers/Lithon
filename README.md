@@ -138,7 +138,7 @@ Lithon is purpose-built for low-latency tasks where Python traditionally relies 
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 9.4541 ms | 1434.1751 ms | 151.7× | 832040 |
+| fib(30) | 7.2721 ms | 1075.1765 ms | 147.8× | 832040 |
 
 **Status:** PASS
 
