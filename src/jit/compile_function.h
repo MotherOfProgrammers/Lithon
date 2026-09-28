@@ -104,7 +104,12 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
             }
         };
 
-        emit_prologue(code, alloc.frame_size());
+        // RBX is callee-saved (System V) but used here as scratch: save it
+        // in a slot below the allocator frame, restore before every return.
+        // The extra 16 bytes keep RSP 16-byte aligned at call sites.
+        const int rbx_save_slot = -(alloc.frame_size() + 8);
+        emit_prologue(code, alloc.frame_size() + 16);
+        emit_store_rbp_offset(code, Reg::RBX, rbx_save_slot);
 
         static const Reg arg_regs[2] = {Reg::RDI, Reg::RSI};
         for (size_t i = 0; i < fn.params.size(); ++i) {
@@ -281,6 +286,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module) {
                                 emit_mov_reg_reg(code, Reg::RAX, src);
                             }
                         }
+                        emit_load_rbp_offset(code, Reg::RBX, rbx_save_slot);
                         emit_epilogue(code);
                         emit_ret(code);
                         break;

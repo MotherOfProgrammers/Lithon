@@ -1,0 +1,18 @@
+function main():
+block0:
+    %0 = const_i64 0
+    store i, %0 : int[64]
+    jump block1
+block1:
+    %1 = load i
+    %2 = const_i64 1000000000
+    %3 = lt %1, %2
+    branch %3, block2, block3
+block2:
+    %4 = load i
+    %5 = const_i64 1
+    %6 = add %4, %5
+    store i, %6
+    jump block1
+block3:
+    return
