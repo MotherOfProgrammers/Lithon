@@ -11,6 +11,8 @@
     <meta name="twitter:card" content="summary" />
     <title>Use cases | Lithon</title>
     <link rel="icon" href="../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../../fonts/fonts.css" />
     <link rel="stylesheet" href="../styles/base.css" />
     <link rel="stylesheet" href="../styles/pages/inner-pages.css" />
     <script>
@@ -89,6 +91,16 @@
               />
             </svg>
           </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
           <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
             <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4.25" />
@@ -163,17 +175,17 @@
 
         <div class="use-case-grid">
           <article class="use-card reveal">
-            <span class="use-icon" aria-hidden="true">⌁</span>
+            0 <span class="use-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5Z" /></svg></span>
             <h3>Low-latency services</h3>
             <p>Predictable typed paths for work that cannot wait for warm-up.</p>
           </article>
           <article class="use-card reveal reveal--delay">
-            <span class="use-icon" aria-hidden="true">▣</span>
+            1 <span class="use-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="12" rx="2" /><path d="M8 7V5a4 4 0 0 1 8 0v2" /></svg></span>
             <h3>Native utilities</h3>
             <p>Small focused tools with no dependency chain to babysit.</p>
           </article>
           <article class="use-card reveal reveal--delay-more">
-            <span class="use-icon" aria-hidden="true">◈</span>
+            2 <span class="use-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg></span>
             <h3>Learning compilers</h3>
             <p>A transparent architecture for people who want to understand the machine.</p>
           </article>
@@ -204,6 +216,25 @@
       </div>
     </footer>
 
+    <script>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("is-ready");
+        var blocks = document.querySelectorAll(".reveal");
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof IntersectionObserver !== "function") {
+          for (var i = 0; i < blocks.length; i += 1) blocks[i].classList.add("is-visible");
+          return;
+        }
+        var observer = new IntersectionObserver(function (entries) {
+          for (var n = 0; n < entries.length; n += 1) {
+            if (!entries[n].isIntersecting) continue;
+            entries[n].target.classList.add("is-visible");
+            observer.unobserve(entries[n].target);
+          }
+        }, { rootMargin: "0px 0px -6% 0px", threshold: 0.05 });
+        for (var j = 0; j < blocks.length; j += 1) observer.observe(blocks[j]);
+      })();
+    </script>
     <script type="module" src="../scripts/site.js"></script>
   </body>
 </html>
