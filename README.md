@@ -52,7 +52,7 @@ make -j$(nproc)
 [+] Emitted 206 bytes x64 machine code @ 0x7f9a12b00000 (PROT_READ|PROT_EXEC)
 [+] Payload: 55 48 89 e5 48 81 ec 20 00 00 00 48 89 7d f8 ...
 [+] Result: fib(30) = 832040
-[+] Execution Time: 9.45 ms (151.7x faster than CPython 3.12)
+[+] Execution Time: 6.90 ms (210.7x faster than CPython 3.12)
 ```
 
 ---
