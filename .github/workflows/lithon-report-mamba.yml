@@ -15,9 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Lithon
-        uses: actions/checkout@v4
-
       - name: Create Lithon Bot token
         id: app-token
         uses: actions/create-github-app-token@v2
@@ -25,9 +22,14 @@ jobs:
           app-id: ${{ secrets.LITHON_REPORTER_MAMBA_APP_ID }}
           private-key: ${{ secrets.LITHON_REPORTER_MAMBA_PKEY }}
 
+      - name: Checkout Lithon
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
       - name: Configure Git
         run: |
-          git config user.name "Lithon Reporter Mamba"
+          git config user.name "Lithon Reporter Mamba[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Build benchmark
@@ -72,8 +74,12 @@ jobs:
         run: |
           python3 mamba/update_readme.py
 
-      - name: Commit benchmark results
+      - name: Commit and Push benchmark results
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git add benchmarks/results README.md
-          git diff --cached --quiet || git commit -m "bot: update benchmark report"
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m "bot: update benchmark report"
+            git push "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git" HEAD:master
+          fi

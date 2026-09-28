@@ -18,7 +18,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshots/web-banner.png" alt="Lithon docs landing page" width="900" />
+  <img src="assets/web-banner.png" alt="Lithon docs landing page" width="900" />
 </p>
 
 ---
