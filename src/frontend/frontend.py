@@ -13,7 +13,8 @@ Two modes, both supported by the same builder:
     signatures): emits IR carrying type_kind/type_width per V1_SPEC
     0.6, consumed by the type-checker before interpretation.
 
-Supports: assignment (typed and untyped), int/float/bool literals,
+Supports: assignment (typed and untyped), augmented assignment
+(+=, -=, *=, /= on a simple name), int/float/bool literals,
 +/-/*//, comparisons (single, non-chained), and/or (exactly two
 operands), not, print(), if/elif/else, while, for ... in range(...),
 function calls, return.
@@ -60,8 +61,19 @@ def parse_type_annotation(node):
     raise NotImplementedError("unsupported type annotation form")
 
 
+# The synthesized module-level entry point is always called `main`
+# (that is what both execution tiers look up). A user function named
+# `main` would collide with it -- previously producing two `function
+# main` definitions, so `print(main())` silently ran the user's body as
+# the program entry and printed nothing. User functions that collide are
+# emitted under a mangled name and calls to them are renamed to match.
+ENTRY_POINT = "main"
+MANGLED_PREFIX = "user_"
+
+
 class IRBuilder:
-    def __init__(self):
+    def __init__(self, fn_rename=None):
+        self.fn_rename = fn_rename or {}
         self.reg_counter = 0
         self.block_counter = 0
         self.blocks = []
@@ -153,11 +165,12 @@ class IRBuilder:
             if node.func.id == "print":
                 raise NotImplementedError("print() is a statement in this slice, not an expression")
             arg_regs = [self.build_expr(a) for a in node.args]
+            callee = self.fn_rename.get(node.func.id, node.func.id)
             r = self.new_reg()
             if arg_regs:
-                self.emit(f"{r} = call {node.func.id}, {', '.join(arg_regs)}")
+                self.emit(f"{r} = call {callee}, {', '.join(arg_regs)}")
             else:
-                self.emit(f"{r} = call {node.func.id}")
+                self.emit(f"{r} = call {callee}")
             return r
 
         raise NotImplementedError(f"expression node {type(node).__name__} not supported yet")
@@ -270,6 +283,26 @@ class IRBuilder:
             self.emit(f"store {name}, {value_reg}")
             return
 
+        if isinstance(node, ast.AugAssign):
+            # `x op= expr` lowers to exactly the IR of `x = x op expr`
+            # (load x, evaluate expr, op, store x), including Python's
+            # left-to-right evaluation order, so the type-checker and
+            # both execution tiers see one canonical shape.
+            if not isinstance(node.target, ast.Name):
+                raise NotImplementedError("only simple name targets are supported for augmented assignment")
+            op_map = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div"}
+            op_type = type(node.op)
+            if op_type not in op_map:
+                raise NotImplementedError(f"augmented operator {op_type.__name__} not supported yet")
+            name = node.target.id
+            current = self.new_reg()
+            self.emit(f"{current} = load {name}")
+            rhs = self.build_expr(node.value)
+            result = self.new_reg()
+            self.emit(f"{result} = {op_map[op_type]} {current}, {rhs}")
+            self.emit(f"store {name}, {result}")
+            return
+
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             call = node.value
             if isinstance(call.func, ast.Name) and call.func.id == "print":
@@ -313,12 +346,21 @@ class IRBuilder:
 
 def build_program(tree):
     module_parts = []
-    main_builder = IRBuilder()
+
+    user_fn_names = {s.name for s in tree.body if isinstance(s, ast.FunctionDef)}
+    fn_rename = {}
+    if ENTRY_POINT in user_fn_names:
+        mangled = MANGLED_PREFIX + ENTRY_POINT
+        while mangled in user_fn_names:
+            mangled = MANGLED_PREFIX + mangled
+        fn_rename[ENTRY_POINT] = mangled
+
+    main_builder = IRBuilder(fn_rename)
     main_builder.start_block(main_builder.reserve_label())
 
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef):
-            fb = IRBuilder()
+            fb = IRBuilder(fn_rename)
             fb.start_block(fb.reserve_label())
 
             param_strs = []
@@ -335,7 +377,8 @@ def build_program(tree):
                 kind, width = parse_type_annotation(stmt.returns)
                 return_suffix = f" -> {kind}" + (f"[{width}]" if width not in (None, -1) else "")
 
-            header = f"function {stmt.name}({', '.join(param_strs)}){return_suffix}:"
+            emitted_name = fn_rename.get(stmt.name, stmt.name)
+            header = f"function {emitted_name}({', '.join(param_strs)}){return_suffix}:"
 
             for s in stmt.body:
                 fb.build_stmt(s)

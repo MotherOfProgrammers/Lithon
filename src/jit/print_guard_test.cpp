@@ -26,7 +26,9 @@ static void expect(const char* name, const std::string& ir_text, bool want_safe)
 }
 
 int main() {
-    // ---- must be REFUSED: a printed value may be bool / float / unknown ----
+    // ---- native now formats provable Bool as True/False, so pure-bool
+    //      prints are SAFE. Mixed/uncertain kinds (float, or a join of
+    //      int and bool) remain REFUSED -- native could not pick one format.
 
     expect("print(1 < 2) is a bool", R"(
 function main():
@@ -36,7 +38,7 @@ block0:
     %2 = lt %0, %1
     call print, %2
     return
-)", false);
+)", true);
 
     expect("print(not 5) is a bool", R"(
 function main():
@@ -45,7 +47,7 @@ block0:
     %1 = not %0
     call print, %1
     return
-)", false);
+)", true);
 
     expect("bool literal through and/or", R"(
 function main():
@@ -55,7 +57,7 @@ block0:
     %2 = and %0, %1
     call print, %2
     return
-)", false);
+)", true);
 
     expect("int and bool mixed in and/or", R"(
 function main():
@@ -77,7 +79,7 @@ block0:
     %3 = load flag
     call print, %3
     return
-)", false);
+)", true);
 
     expect("variable is int on one path, bool on another", R"(
 function main():
@@ -109,7 +111,7 @@ block0:
     %2 = call less, %0, %1
     call print, %2
     return
-)", false);
+)", true);
 
     expect("bool argument printed inside callee", R"(
 function show(v):
@@ -125,7 +127,7 @@ block0:
     %2 = lt %0, %1
     call show, %2
     return
-)", false);
+)", true);
 
     expect("float printed", R"(
 function main():
@@ -174,7 +176,13 @@ block0:
     return
 )", false);
 
-    // ---- must be SAFE: every printed value is provably int ----
+    // ---- must be REFUSED: float, or a join of incomparable kinds ----
+
+    // (the two mixed-kind cases above -- "int and bool mixed" and
+    //  "variable is int on one path, bool on another" -- already covered
+    //  this; the float and Unknown cases below round it out)
+
+    // ---- must be SAFE: every printed value is provably int or bool ----
 
     expect("int arithmetic", R"(
 function main():

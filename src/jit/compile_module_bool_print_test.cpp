@@ -12,7 +12,7 @@
 
 #include "compile_function.h"
 #include "ir/ir.h"
-#include <sys/mman.h>
+#include "exec_memory.h"
 #include <cstdio>
 #include <cstring>
 
@@ -45,14 +45,9 @@ int main() {
 
     CompiledModule compiled = compile_module(module);
 
-    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) { std::perror("mmap"); return 1; }
-    std::memcpy(mem, compiled.code.data(), compiled.code.size());
-    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
-        std::perror("mprotect");
-        return 1;
-    }
+    // Portable W^X executable memory (mmap/mprotect on POSIX, VirtualAlloc/VirtualProtect on Windows).
+    ExecutableBuffer exec_mem(compiled.code);
+    void* mem = exec_mem.data();
 
     VoidFunc compiled_main = reinterpret_cast<VoidFunc>(
         reinterpret_cast<uint8_t*>(mem) + compiled.function_offset.at("main"));

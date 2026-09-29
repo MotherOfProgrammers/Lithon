@@ -41,7 +41,22 @@ MODES = ("auto", "strict", "interp")
 
 _ROOT = Path(os.environ.get("LITHON_HOME", Path(__file__).resolve().parent))
 _FRONTEND = _ROOT / "src" / "frontend" / "frontend.py"
-_RUNNER = Path(os.environ.get("LITHON_RUNNER", _ROOT / "build" / "tier_runner"))
+
+
+def _default_runner() -> Path:
+    # CMake appends .exe on Windows, and a multi-config generator (Visual
+    # Studio) places it under build/Release/ rather than build/ directly.
+    # Try the candidates that actually occur before falling back to the
+    # POSIX default so the "not found" error below still names a sensible
+    # path.
+    name = "tier_runner.exe" if os.name == "nt" else "tier_runner"
+    for candidate in (_ROOT / "build" / name, _ROOT / "build" / "Release" / name):
+        if candidate.exists():
+            return candidate
+    return _ROOT / "build" / name
+
+
+_RUNNER = Path(os.environ.get("LITHON_RUNNER", _default_runner()))
 
 _frontend_module = None
 

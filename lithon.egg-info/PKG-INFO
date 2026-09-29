@@ -26,6 +26,12 @@ Dynamic: license-file
 
 ---
 
+<p align="center">
+  <img src="assets/web-banner.png" alt="Lithon docs landing page" width="900" />
+</p>
+
+---
+
 ## 🚀 What is Lithon?
 
 Lithon is a **zero-dependency, dual-tier execution engine** for a statically verified, Python-flavored language built for bare-metal performance.
@@ -147,7 +153,7 @@ Lithon is purpose-built for low-latency tasks where Python traditionally relies 
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 8.3465 ms | 1453.4665 ms | 174.1× | 832040 |
+| fib(30) | 8.4363 ms | 1438.7375 ms | 170.5× | 832040 |
 
 **Status:** PASS
 

@@ -17,6 +17,11 @@ Inputs:
 Adversarial cases also declare which tier they EXPECT, so a guard that
 becomes too weak (native where it must refuse) or too strict (interpreter
 where native is provably safe) both fail the run.
+
+The JIT now formats a provably-Bool print() argument as True/False (see
+compile_function.h / print_guard.h), so the four pure-bool adversarial
+cases below expect tier1, not tier0: native is correct for them now. Only
+genuinely mixed/uncertain kinds (float_print) still expect a fallback.
 """
 import pathlib
 import subprocess
@@ -38,7 +43,7 @@ block0:
     %2 = lt %0, %1
     call print, %2
     return
-""", "tier0"),
+""", "tier1"),
     "not_of_int": ("""
 function main():
 block0:
@@ -49,7 +54,7 @@ block0:
     %3 = not %2
     call print, %3
     return
-""", "tier0"),
+""", "tier1"),
     "bool_via_variable": ("""
 function main():
 block0:
@@ -60,7 +65,7 @@ block0:
     %3 = load flag
     call print, %3
     return
-""", "tier0"),
+""", "tier1"),
     "bool_via_return": ("""
 function less(a, b):
 block0:
@@ -77,7 +82,7 @@ block0:
     %2 = call less, %0, %1
     call print, %2
     return
-""", "tier0"),
+""", "tier1"),
     "float_print": ("""
 function main():
 block0:

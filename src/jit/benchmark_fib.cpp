@@ -5,7 +5,7 @@
 #include "compile_function.h"
 #include "ir/ir.h"
 #include "interpreter/interpreter.h"
-#include <sys/mman.h>
+#include "exec_memory.h"
 #include <cstdio>
 #include <cstring>
 #include <chrono>
@@ -82,10 +82,8 @@ int main() {
     Module native_module = build_fib_module();
     CompiledModule compiled = compile_module(native_module);
 
-    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    std::memcpy(mem, compiled.code.data(), compiled.code.size());
-    mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC);
+    ExecutableBuffer exec_mem(compiled.code);
+    void* mem = exec_mem.data();
 
     typedef int64_t (*FibFunc)(int64_t);
     FibFunc native_fib = reinterpret_cast<FibFunc>(

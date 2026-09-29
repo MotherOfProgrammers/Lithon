@@ -10,7 +10,7 @@
 
 #include "compile_function.h"
 #include "ir/ir.h"
-#include <sys/mman.h>
+#include "exec_memory.h"
 #include <cstdio>
 #include <cstring>
 
@@ -52,16 +52,9 @@ int main() {
     for (auto b : compiled.code) std::printf(" %02x", b);
     std::printf("\n");
 
-    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) { std::perror("mmap"); return 1; }
-
-    std::memcpy(mem, compiled.code.data(), compiled.code.size());
-
-    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
-        std::perror("mprotect");
-        return 1;
-    }
+    // Portable W^X executable memory (mmap/mprotect on POSIX, VirtualAlloc/VirtualProtect on Windows).
+    ExecutableBuffer exec_mem(compiled.code);
+    void* mem = exec_mem.data();
 
     size_t max_offset = compiled.function_offset.at("max");
     MaxFunc compiled_max = reinterpret_cast<MaxFunc>(

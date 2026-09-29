@@ -1,33 +1,30 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <algorithm>
 #include "ir/ir.h"
+#include "jit_abi.h"
 #include "liveness.h"
 #include "x86_encoder.h"
 
-// Register allocation for Lithon's v1 codegen, split into two
-// independent, deliberately simple mechanisms (see liveness.h's
-// design note for why this split is CORRECT, not a shortcut):
+// Register allocation for Lithon's x86-64 codegen. Two independent
+// mechanisms (see liveness.h for why the split is sound):
 //
-//   1. Named variables (locals/params) -- one fixed stack slot each,
-//      for the whole function.
-//   2. %N temporaries -- allocated to a small pool of scratch
-//      registers via linear scan, spilling to a stack slot when the
-//      pool is exhausted OR when the value's live range spans a
-//      Call instruction (see below).
-//
-// Register pool: RAX, RCX, RDX only (3 registers) for real
-// allocation. RBX is deliberately RESERVED, never assigned to a %N
-// value -- it is used purely as transient scratch space within a
-// single instruction's codegen when reading or writing a spilled
-// value (compile_function.h). This is necessary because RAX/RCX/RDX
-// are caller-saved per the System V ABI: any value a called function
-// (or anything IT calls) might clobber them, so a temporary whose
-// live range spans a Call must never live in one of them -- it is
-// forced to a stack slot instead, which survives any call.
+//   1. Named variables. Every variable keeps a home stack slot, and the
+//      hottest ones (weighted by loop depth) are PROMOTED into
+//      callee-saved registers {rbx, r12-r15} for the whole function --
+//      this is what removes the load/store traffic from loops. A
+//      promoted register is saved/restored in the function's own frame,
+//      so it survives calls and the host ABI is honoured.
+//   2. %N temporaries. Linear scan over a caller-saved pool that never
+//      contains an argument register (jit_abi.h). A temporary whose live
+//      range spans a Call is spilled, because a call may clobber the
+//      whole pool. Temporaries that codegen turns into immediates,
+//      aliases of a promoted variable, or fused compare/store results
+//      never need a location and are excluded ("virtual temps").
 namespace lithon::jit {
 
 struct ValueLocation {
@@ -36,13 +33,59 @@ struct ValueLocation {
     int stack_slot = -1;
 };
 
+using PromotionMap = std::unordered_map<std::string, Reg>;
+
+// Chooses which variables to keep in registers. A variable's weight is
+// the number of its loads/stores, each scaled by 10^(loop depth). Only
+// variables that beat the cost of saving+restoring a register (two
+// memory ops per call) are promoted.
+inline PromotionMap select_promoted_variables(const lithon::ir::Function& fn) {
+    using namespace lithon::ir;
+    const auto loops = find_loops(fn);
+
+    std::unordered_map<std::string, double> weight;
+    for (const auto& p : fn.params) weight[p] += 1.0;   // entry store
+
+    for (size_t b = 0; b < fn.blocks.size(); ++b) {
+        int depth = 0;
+        for (const auto& loop : loops) {
+            if (b >= loop.first_block && b <= loop.last_block) ++depth;
+        }
+        double scale = std::pow(10.0, std::min(depth, 6));
+        for (const auto& in : fn.blocks[b].instrs) {
+            if (in.op == Op::Load || in.op == Op::Store) weight[in.name] += scale;
+        }
+    }
+
+    std::vector<std::pair<std::string, double>> ranked;
+    for (const auto& kv : weight) {
+        if (kv.second > 2.0) ranked.push_back(kv);
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+        return a.second != b.second ? a.second > b.second : a.first < b.first;
+    });
+
+    PromotionMap promoted;
+    for (size_t i = 0; i < ranked.size() && i < abi::kPromotionPool.size(); ++i) {
+        promoted[ranked[i].first] = abi::kPromotionPool[i];
+    }
+    return promoted;
+}
+
 class RegisterAllocator {
 public:
+    // Convenience form (used by the unit tests): automatic promotion,
+    // every temporary gets a location.
     explicit RegisterAllocator(const lithon::ir::Function& fn)
-        : fn_(fn), liveness_(fn) {
+        : RegisterAllocator(fn, select_promoted_variables(fn), {}) {}
+
+    RegisterAllocator(const lithon::ir::Function& fn, PromotionMap promoted,
+                      const std::unordered_set<lithon::ir::ValueId>& virtual_temps)
+        : fn_(fn), liveness_(fn), promoted_(std::move(promoted)) {
         assign_variable_slots();
+        assign_callee_saved_slots();
         find_call_indices();
-        assign_temporary_locations();
+        assign_temporary_locations(virtual_temps);
     }
 
     int variable_offset(const std::string& name) const {
@@ -52,6 +95,20 @@ public:
 
     bool has_variable(const std::string& name) const {
         return variable_offsets_.count(name) != 0;
+    }
+
+    bool variable_in_register(const std::string& name) const {
+        return promoted_.count(name) != 0;
+    }
+
+    Reg variable_reg(const std::string& name) const { return promoted_.at(name); }
+
+    const PromotionMap& promoted() const { return promoted_; }
+
+    // (register, frame slot) pairs the prologue must save and every
+    // return must restore.
+    const std::vector<std::pair<Reg, int>>& callee_saved_slots() const {
+        return callee_saved_slots_;
     }
 
     const ValueLocation& temp_location(lithon::ir::ValueId id) const {
@@ -69,11 +126,13 @@ public:
 private:
     const lithon::ir::Function& fn_;
     LivenessAnalysis liveness_;
+    PromotionMap promoted_;
 
     std::unordered_map<std::string, int> variable_offsets_;
     std::vector<std::string> variable_order_;
+    std::vector<std::pair<Reg, int>> callee_saved_slots_;
     std::unordered_map<lithon::ir::ValueId, ValueLocation> temp_locations_;
-    std::vector<int> call_indices_; // flat instruction indices of Call ops
+    std::vector<int> call_indices_;
     int next_slot_offset_ = 0;
     int frame_size_ = 0;
 
@@ -99,16 +158,22 @@ private:
         }
     }
 
-    // Flat instruction indices of every Call, using the SAME
-    // block-then-instruction counting scheme as liveness.h, so the
-    // indices line up with LiveRange.birth/last_use.
+    void assign_callee_saved_slots() {
+        for (Reg r : abi::kPromotionPool) {
+            for (const auto& kv : promoted_) {
+                if (kv.second == r) {
+                    callee_saved_slots_.push_back({r, allocate_new_slot()});
+                    break;
+                }
+            }
+        }
+    }
+
     void find_call_indices() {
         int idx = 0;
         for (const auto& block : fn_.blocks) {
             for (const auto& instr : block.instrs) {
-                if (instr.op == lithon::ir::Op::Call) {
-                    call_indices_.push_back(idx);
-                }
+                if (instr.op == lithon::ir::Op::Call) call_indices_.push_back(idx);
                 ++idx;
             }
         }
@@ -116,65 +181,59 @@ private:
 
     // True if [birth, last_use] genuinely SPANS a call -- defined
     // strictly before it and used strictly after it. A value that IS
-    // the call's own result (birth == call_idx) or that is merely an
-    // ARGUMENT to the call (last_use == call_idx) is not spanning --
-    // both are safe in a caller-saved register.
+    // the call's own result (birth == call_idx) or merely an ARGUMENT
+    // to the call (last_use == call_idx) is safe in a caller-saved reg.
     bool spans_a_call(const LiveRange& range) const {
         for (int call_idx : call_indices_) {
-            if (range.birth < call_idx && range.last_use > call_idx) {
-                return true;
-            }
+            if (range.birth < call_idx && range.last_use > call_idx) return true;
         }
         return false;
     }
 
-    void assign_temporary_locations() {
-        // Only 2 registers allocatable to real %N values. RDX and RBX
-        // are BOTH reserved as dedicated read scratch (see
-        // compile_function.h): RDX for a binop's left operand, RBX
-        // for its right operand. This is not a stylistic choice --
-        // a single shared scratch register was found to silently
-        // corrupt results whenever BOTH operands of a binop were
-        // spilled simultaneously (the second spill-load clobbered
-        // the first before it was used). Two independent scratch
-        // registers make that class of bug structurally impossible.
-        const std::vector<Reg> pool = {Reg::RAX, Reg::RCX};
+    void assign_temporary_locations(const std::unordered_set<lithon::ir::ValueId>& virtual_temps) {
+        std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries;
+        for (const auto& kv : liveness_.ranges()) {
+            if (!virtual_temps.count(kv.first)) entries.push_back(kv);
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            return a.second.birth != b.second.birth ? a.second.birth < b.second.birth
+                                                    : a.first < b.first;
+        });
 
-        std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries(
-            liveness_.ranges().begin(), liveness_.ranges().end());
-        std::sort(entries.begin(), entries.end(),
-                  [](const auto& a, const auto& b) { return a.second.birth < b.second.birth; });
-
-        std::unordered_set<Reg> free_regs(pool.begin(), pool.end());
+        std::vector<Reg> free_regs(abi::kTempPool.begin(), abi::kTempPool.end());
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> active;
 
         for (const auto& entry : entries) {
             lithon::ir::ValueId id = entry.first;
             const LiveRange& range = entry.second;
 
-            active.erase(std::remove_if(active.begin(), active.end(),
-                [&](const auto& a) {
-                    if (a.second.last_use < range.birth) {
-                        auto loc_it = temp_locations_.find(a.first);
-                        if (loc_it != temp_locations_.end() && loc_it->second.in_register) {
-                            free_regs.insert(loc_it->second.reg);
-                        }
-                        return true;
+            active.erase(std::remove_if(active.begin(), active.end(), [&](const auto& a) {
+                if (a.second.last_use < range.birth) {
+                    auto loc_it = temp_locations_.find(a.first);
+                    if (loc_it != temp_locations_.end() && loc_it->second.in_register) {
+                        free_regs.push_back(loc_it->second.reg);
                     }
-                    return false;
-                }), active.end());
+                    return true;
+                }
+                return false;
+            }), active.end());
 
-            bool must_spill = spans_a_call(range);
-
-            if (!must_spill && !free_regs.empty()) {
-                Reg r = *free_regs.begin();
-                free_regs.erase(free_regs.begin());
+            if (!spans_a_call(range) && !free_regs.empty()) {
+                // Lowest-numbered pool order first, for deterministic output.
+                auto pick = std::min_element(free_regs.begin(), free_regs.end(), [](Reg a, Reg b) {
+                    auto rank = [](Reg r) {
+                        for (size_t i = 0; i < abi::kTempPool.size(); ++i)
+                            if (abi::kTempPool[i] == r) return i;
+                        return abi::kTempPool.size();
+                    };
+                    return rank(a) < rank(b);
+                });
+                Reg r = *pick;
+                free_regs.erase(pick);
                 temp_locations_[id] = ValueLocation{true, r, -1};
             } else {
-                int slot = allocate_new_slot();
-                temp_locations_[id] = ValueLocation{false, Reg::RAX, slot};
+                temp_locations_[id] = ValueLocation{false, Reg::RAX, allocate_new_slot()};
             }
-
             active.push_back(entry);
         }
 

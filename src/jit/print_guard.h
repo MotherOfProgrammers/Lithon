@@ -271,11 +271,14 @@ struct Analysis {
             return;
         }
         Kind k = val(st, in.args[0]);
-        if (k != Kind::Int) {
+        // Bool is native-safe: the JIT now formats a provably-bool value as
+        // True/False (see compile_function.h), matching the interpreter.
+        // Anything else -- float, or a join of incomparable kinds -- is not.
+        if (k != Kind::Int && k != Kind::Bool) {
             verdict->native_safe = false;
             verdict->reasons.push_back(where + ": print argument %" +
                 std::to_string(in.args[0]) + " is " + kind_name(k) +
-                "; native print() would format it as an int");
+                "; native print() cannot format it (only int and bool are supported)");
         }
     }
 };
@@ -306,6 +309,27 @@ inline GuardVerdict check_print_safety(const lithon::ir::Module& module) {
     }
     for (auto& st : an.fns) an.run_function(st, true, &verdict);
     return verdict;
+}
+
+// The same whole-module analysis, exposed per-value instead of collapsed
+// into one verdict: kinds[i][id] is the inferred Kind of ValueId `id` in
+// module.functions[i] (index-parallel to the module, since both this and
+// check_print_safety iterate m.functions in the same order). The code
+// generator uses this to decide print() formatting -- Bool vs Int -- for
+// modules it compiles directly (e.g. lithon_jit), independently of whether
+// the *whole module* would pass the stricter tier_runner safety gate.
+inline std::vector<std::vector<Kind>> infer_value_kinds(const lithon::ir::Module& module) {
+    detail::Analysis an;
+    an.init(module);
+    for (int iter = 0; iter < 1000; ++iter) {
+        an.changed = false;
+        for (auto& st : an.fns) an.run_function(st, false, nullptr);
+        if (!an.changed) break;
+    }
+    std::vector<std::vector<Kind>> out;
+    out.reserve(an.fns.size());
+    for (auto& st : an.fns) out.push_back(st.vals);
+    return out;
 }
 
 }  // namespace lithon::jit
