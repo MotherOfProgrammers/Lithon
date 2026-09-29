@@ -1,0 +1,57 @@
+{
+  "python": "3.14.4",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
+  "build_type": "Release",
+  "runs": 20,
+  "baseline_ms": 4.079556500073522,
+  "rows": [
+    {
+      "program": "fib(30) recursion",
+      "cpython_ms": 331.02874949690886,
+      "cpython_min": 282.6688369968906,
+      "cpython_max": 380.2123269997537,
+      "native_raw_ms": 16.99677700526081,
+      "native_net_ms": 12.917220505187288,
+      "native_min": 12.307644996326417,
+      "native_max": 22.617152018938214,
+      "speedup": 25.62693339205401,
+      "output_match": true
+    },
+    {
+      "program": "sum loop 20,000,000",
+      "cpython_ms": 5540.590290504042,
+      "cpython_min": 4570.634769974276,
+      "cpython_max": 6838.692503981292,
+      "native_raw_ms": 18.775303004076704,
+      "native_net_ms": 14.695746504003182,
+      "native_min": 17.443239979911596,
+      "native_max": 33.029002021066844,
+      "speedup": 377.019996159757,
+      "output_match": true
+    },
+    {
+      "program": "nested loops 3000x3000",
+      "cpython_ms": 3044.347998482408,
+      "cpython_min": 2841.7361580068246,
+      "cpython_max": 5507.694324012846,
+      "native_raw_ms": 20.19107897649519,
+      "native_net_ms": 16.11152247642167,
+      "native_min": 14.633763988967985,
+      "native_max": 33.75083697028458,
+      "speedup": 188.9547063561277,
+      "output_match": true
+    },
+    {
+      "program": "branchy loop 10,000,000",
+      "cpython_ms": 2266.4780500053894,
+      "cpython_min": 2052.2923750104383,
+      "cpython_max": 2691.689494997263,
+      "native_raw_ms": 17.63744099298492,
+      "native_net_ms": 13.557884492911398,
+      "native_min": 13.932865986134857,
+      "native_max": 30.15349799534306,
+      "speedup": 167.17047937607038,
+      "output_match": true
+    }
+  ]
+}
