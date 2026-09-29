@@ -9,17 +9,7 @@
 //             nothing: no interpreter fallback ("slow paths never exist").
 //   --native  force the JIT with the guard OFF. Unsafe: for testing only.
 //
-// Runs on Linux, macOS/Intel and Windows: executable memory goes through
-// exec_memory.h's ExecutableBuffer (mmap/mprotect on POSIX, VirtualAlloc/
-// VirtualProtect + FlushInstructionCache on Windows), and compile_module's
-// codegen is ABI-aware (System V / Microsoft x64). x86-64 only -- it emits
-// x86-64 machine code directly.
-//
-// The native path runs with every optimization on (register promotion,
-// constant folding, dead-code elimination, loop rotation and unrolling --
-// see CompileOptions in compile_function.h): this is the runner real
-// programs go through, not a debugging tool, so there is no reason to
-// leave speed on the table.
+// Linux/x86-64 only (uses mmap/mprotect).
 //
 // Which tier actually ran is reported on stderr as "[tier0]" (interpreter)
 // or "[tier1]" (native), so a test harness can compare stdout between
@@ -29,8 +19,8 @@
 //   g++ -std=c++20 -O2 -Isrc -Isrc/jit -o build/tier_runner
 //       src/jit/tier_runner.cpp src/ir/text_parser.cpp
 //       src/interpreter/interpreter.cpp src/typecheck/typecheck.cpp
-// (On Windows this is the same command under MSVC or MinGW -- no
-// platform-specific flags needed; exec_memory.h handles the difference.)
+
+#include <sys/mman.h>
 
 #include <cstdio>
 #include <cstring>
@@ -40,7 +30,6 @@
 #include <string>
 
 #include "compile_function.h"
-#include "exec_memory.h"
 #include "interpreter/interpreter.h"
 #include "ir/text_parser.h"
 #include "print_guard.h"
@@ -71,33 +60,36 @@ void run_interpreter(const lithon::ir::Module& m) {
 bool run_native(const lithon::ir::Module& m) {
     lithon::jit::CompiledModule compiled;
     try {
-        // Defaults: optimize=true, promote_registers=true, rotate_loops=true,
-        // unroll_factor=4 -- see CompileOptions in compile_function.h.
-        compiled = lithon::jit::compile_module(m, lithon::jit::CompileOptions{});
+        compiled = lithon::jit::compile_module(m);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[tier0] native compile refused: %s\n", e.what());
         return false;
     }
 
-    auto main_it = compiled.function_offset.find("main");
+    auto main_it = compiled.function_offset.find("__main__");
+    if (main_it == compiled.function_offset.end())
+        main_it = compiled.function_offset.find("main");
     if (main_it == compiled.function_offset.end()) {
-        std::fputs("[tier0] native compile refused: no main()\n", stderr);
+        std::fputs("[tier0] native compile refused: no __main__/main entry\n", stderr);
         return false;
     }
 
-    lithon::jit::ExecutableBuffer exec_mem;
-    try {
-        exec_mem.load(compiled.code.data(), compiled.code.size());
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "[tier0] native compile refused: %s\n", e.what());
+    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mem == MAP_FAILED) { std::perror("mmap"); return false; }
+    std::memcpy(mem, compiled.code.data(), compiled.code.size());
+    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
+        std::perror("mprotect");
+        munmap(mem, compiled.code.size());
         return false;
     }
 
     std::fputs("[tier1] native\n", stderr);
     using Fn = void (*)();
-    auto entry = exec_mem.entry<Fn>(main_it->second);
+    auto entry = reinterpret_cast<Fn>(static_cast<uint8_t*>(mem) + main_it->second);
     entry();
     std::fflush(stdout);   // native print() goes through libc stdio
+    munmap(mem, compiled.code.size());
     return true;
 }
 

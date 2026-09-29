@@ -63,7 +63,9 @@ public:
             }
             entry_scope[fn_.params[i]] = LType{fn_.param_type_kinds[i], fn_.param_type_widths[i]};
         }
-        if (fn_.name != "main" && !has_return_type) {
+        // Entry points are exempt from the return-annotation rule: the frontend's
+        // implicit top-level function is __main__, and hand-written IR may use main.
+        if (fn_.name != "main" && fn_.name != "__main__" && !has_return_type) {
             error("function '" + fn_.name + "' has no return type annotation (V1_SPEC 0.6.8)");
         }
 

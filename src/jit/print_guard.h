@@ -9,9 +9,11 @@
 //
 // This header answers one question, conservatively:
 //
-//     "Is every print() argument in this module provably an int?"
+//     "Is every print() argument in this module provably an int or a bool?"
 //
-// If yes, native compilation is output-safe. If no, the caller must
+// (The JIT prints a provably-bool value as True/False and a provably-int
+// value as a decimal; see compile_function.h.) If yes, native compilation
+// is output-safe. If no, the caller must
 // use the Tier-0 interpreter. "Provably" means the abstract kind of the
 // value is exactly Int after a whole-module fixpoint. Anything unseen,
 // mixed, or unknown counts as unsafe.
@@ -150,8 +152,12 @@ struct Analysis {
                         auto it = index.find(in.name);
                         if (it != index.end()) fns[it->second].called = true;
                     }
-        auto mi = index.find("main");
-        if (mi != index.end()) fns[mi->second].called = true;
+        // The runtime enters __main__ (the frontend's implicit top-level
+        // function) or, for hand-written IR, a plain main.
+        for (const char* entry : {"__main__", "main"}) {
+            auto mi = index.find(entry);
+            if (mi != index.end()) fns[mi->second].called = true;
+        }
 
         // A function nothing calls could be entered from outside with any
         // arguments, so its untyped parameters are unknown.

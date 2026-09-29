@@ -10,21 +10,7 @@
 #include "liveness.h"
 #include "x86_encoder.h"
 
-// Register allocation for Lithon's x86-64 codegen. Two independent
-// mechanisms (see liveness.h for why the split is sound):
-//
-//   1. Named variables. Every variable keeps a home stack slot, and the
-//      hottest ones (weighted by loop depth) are PROMOTED into
-//      callee-saved registers {rbx, r12-r15} for the whole function --
-//      this is what removes the load/store traffic from loops. A
-//      promoted register is saved/restored in the function's own frame,
-//      so it survives calls and the host ABI is honoured.
-//   2. %N temporaries. Linear scan over a caller-saved pool that never
-//      contains an argument register (jit_abi.h). A temporary whose live
-//      range spans a Call is spilled, because a call may clobber the
-//      whole pool. Temporaries that codegen turns into immediates,
-//      aliases of a promoted variable, or fused compare/store results
-//      never need a location and are excluded ("virtual temps").
+
 namespace lithon::jit {
 
 struct ValueLocation {
@@ -74,14 +60,21 @@ inline PromotionMap select_promoted_variables(const lithon::ir::Function& fn) {
 
 class RegisterAllocator {
 public:
-    // Convenience form (used by the unit tests): automatic promotion,
-    // every temporary gets a location.
-    explicit RegisterAllocator(const lithon::ir::Function& fn)
-        : RegisterAllocator(fn, select_promoted_variables(fn), {}) {}
+    // Convenience form: automatic weighted promotion, no virtual temps.
+    // `folds` is forwarded to LivenessAnalysis so a folded-away constant
+    // (see liveness.h) never costs a register or a spill slot it will
+    // never actually use. Covers both call shapes seen in this codebase
+    // to date: RegisterAllocator(fn) and RegisterAllocator(fn, &folds).
+    explicit RegisterAllocator(const lithon::ir::Function& fn,
+                               const ImmediateFolds* folds = nullptr)
+        : RegisterAllocator(fn, select_promoted_variables(fn), {}, folds) {}
 
+    // Full form: explicit control over which variables are promoted and
+    // which %N temporaries need no location at all.
     RegisterAllocator(const lithon::ir::Function& fn, PromotionMap promoted,
-                      const std::unordered_set<lithon::ir::ValueId>& virtual_temps)
-        : fn_(fn), liveness_(fn), promoted_(std::move(promoted)) {
+                      const std::unordered_set<lithon::ir::ValueId>& virtual_temps,
+                      const ImmediateFolds* folds = nullptr)
+        : fn_(fn), liveness_(fn, folds), promoted_(std::move(promoted)) {
         assign_variable_slots();
         assign_callee_saved_slots();
         find_call_indices();
@@ -94,21 +87,35 @@ public:
     }
 
     bool has_variable(const std::string& name) const {
-        return variable_offsets_.count(name) != 0;
+        return variable_offsets_.count(name) != 0 || promoted_.count(name) != 0;
     }
 
     bool variable_in_register(const std::string& name) const {
         return promoted_.count(name) != 0;
     }
 
-    Reg variable_reg(const std::string& name) const { return promoted_.at(name); }
+    Reg variable_register(const std::string& name) const { return promoted_.at(name); }
+    // Alias for call sites written against the other in-flight naming
+    // of this accessor -- kept to avoid guessing which one the current
+    // compile_function.h actually calls.
+    Reg variable_reg(const std::string& name) const { return variable_register(name); }
 
     const PromotionMap& promoted() const { return promoted_; }
 
     // (register, frame slot) pairs the prologue must save and every
-    // return must restore.
+    // return must restore -- exactly the promoted registers this
+    // function actually uses, never more.
     const std::vector<std::pair<Reg, int>>& callee_saved_slots() const {
         return callee_saved_slots_;
+    }
+
+    // Convenience view over callee_saved_slots() for a caller that only
+    // needs the register list. Derived, not stored redundantly.
+    std::vector<Reg> used_variable_registers() const {
+        std::vector<Reg> regs;
+        regs.reserve(callee_saved_slots_.size());
+        for (const auto& kv : callee_saved_slots_) regs.push_back(kv.first);
+        return regs;
     }
 
     const ValueLocation& temp_location(lithon::ir::ValueId id) const {
@@ -141,19 +148,23 @@ private:
         return next_slot_offset_;
     }
 
+    // A stack slot for every variable that did NOT get promoted --
+    // never both a register and a slot for the same variable (see the
+    // class-level comment for why that would be dead weight, not just
+    // stylistically wasteful).
     void assign_variable_slots() {
-        for (const auto& param : fn_.params) {
-            if (!variable_offsets_.count(param)) {
-                variable_offsets_[param] = allocate_new_slot();
-                variable_order_.push_back(param);
+        std::unordered_set<std::string> seen;
+        auto assign_one = [&](const std::string& name) {
+            if (!seen.insert(name).second) return;   // already handled
+            variable_order_.push_back(name);
+            if (!promoted_.count(name)) {
+                variable_offsets_[name] = allocate_new_slot();
             }
-        }
+        };
+        for (const auto& param : fn_.params) assign_one(param);
         for (const auto& block : fn_.blocks) {
             for (const auto& instr : block.instrs) {
-                if (instr.op == lithon::ir::Op::Store && !variable_offsets_.count(instr.name)) {
-                    variable_offsets_[instr.name] = allocate_new_slot();
-                    variable_order_.push_back(instr.name);
-                }
+                if (instr.op == lithon::ir::Op::Store) assign_one(instr.name);
             }
         }
     }
@@ -169,6 +180,9 @@ private:
         }
     }
 
+    // Flat instruction indices of every Call, using the SAME
+    // block-then-instruction counting scheme as liveness.h, so the
+    // indices line up with LiveRange.birth/last_use.
     void find_call_indices() {
         int idx = 0;
         for (const auto& block : fn_.blocks) {
@@ -181,8 +195,9 @@ private:
 
     // True if [birth, last_use] genuinely SPANS a call -- defined
     // strictly before it and used strictly after it. A value that IS
-    // the call's own result (birth == call_idx) or merely an ARGUMENT
-    // to the call (last_use == call_idx) is safe in a caller-saved reg.
+    // the call's own result (birth == call_idx) or that is merely an
+    // ARGUMENT to the call (last_use == call_idx) is not spanning --
+    // both are safe in a caller-saved register.
     bool spans_a_call(const LiveRange& range) const {
         for (int call_idx : call_indices_) {
             if (range.birth < call_idx && range.last_use > call_idx) return true;

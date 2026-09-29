@@ -14,6 +14,8 @@ using lithon::jit::check_print_safety;
 static int g_failed = 0;
 static int g_total = 0;
 
+// Bool prints are native-safe: compile_function.h emits True/False for a provably-bool
+// value, so only float, mixed, unknown and malformed prints are refused.
 static void expect(const char* name, const std::string& ir_text, bool want_safe) {
     ++g_total;
     auto module = lithon::ir::parse_ir_text(ir_text);
@@ -26,9 +28,7 @@ static void expect(const char* name, const std::string& ir_text, bool want_safe)
 }
 
 int main() {
-    // ---- native now formats provable Bool as True/False, so pure-bool
-    //      prints are SAFE. Mixed/uncertain kinds (float, or a join of
-    //      int and bool) remain REFUSED -- native could not pick one format.
+    // ---- must be REFUSED: a printed value may be float / mixed / unknown ----
 
     expect("print(1 < 2) is a bool", R"(
 function main():
@@ -175,12 +175,6 @@ block0:
     call print
     return
 )", false);
-
-    // ---- must be REFUSED: float, or a join of incomparable kinds ----
-
-    // (the two mixed-kind cases above -- "int and bool mixed" and
-    //  "variable is int on one path, bool on another" -- already covered
-    //  this; the float and Unknown cases below round it out)
 
     // ---- must be SAFE: every printed value is provably int or bool ----
 

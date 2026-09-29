@@ -61,13 +61,16 @@ def parse_type_annotation(node):
     raise NotImplementedError("unsupported type annotation form")
 
 
-# The synthesized module-level entry point is always called `main`
-# (that is what both execution tiers look up). A user function named
-# `main` would collide with it -- previously producing two `function
-# main` definitions, so `print(main())` silently ran the user's body as
-# the program entry and printed nothing. User functions that collide are
-# emitted under a mangled name and calls to them are renamed to match.
-ENTRY_POINT = "main"
+# The synthesized module-level entry point is called `__main__`, which
+# both execution tiers look up first (falling back to a plain `main` for
+# hand-written IR). Because the entry point is not `main`, a user function
+# named `main` is an ordinary function and cannot collide with it -- the
+# old collision emitted two `function main` definitions, so `print(main())`
+# silently ran the user's body as the program entry and printed nothing.
+# A user function that does take the reserved entry name (`def __main__`)
+# is emitted under a mangled name and calls to it are renamed to match, so
+# the entry point is always unique.
+ENTRY_POINT = "__main__"
 MANGLED_PREFIX = "user_"
 
 
@@ -388,7 +391,7 @@ def build_program(tree):
             main_builder.build_stmt(stmt)
 
     main_builder.emit("return")
-    module_parts.append(main_builder.render("function main():"))
+    module_parts.append(main_builder.render(f"function {ENTRY_POINT}():"))
 
     return "\n\n".join(module_parts) + "\n"
 

@@ -1,7 +1,8 @@
 """`lithon` command line:  lithon script.py [--strict | --interp] [--ir] [--verbose]"""
 import argparse
 import sys
-from init import LithonError, __version__, compile as compile_file, run
+
+from . import LithonError, __version__, compile as compile_file, run
 
 
 def main(argv=None) -> int:

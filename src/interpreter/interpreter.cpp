@@ -258,9 +258,12 @@ LithonValue execute_function(const Module& module, const Function& fn,
 } // namespace
 
 void run_main(const Module& module) {
-    const Function* main_fn = find_function(module, "main");
+    // Entry point: the frontend emits __main__ (so user code may define its own
+    // `main`); hand-written IR may still use a plain `main`.
+    const Function* main_fn = find_function(module, "__main__");
+    if (!main_fn) main_fn = find_function(module, "main");
     if (!main_fn) {
-        throw std::runtime_error("interpreter: no 'main' function in module");
+        throw std::runtime_error("interpreter: no '__main__' or 'main' function in module");
     }
     execute_function(module, *main_fn, {});
 }

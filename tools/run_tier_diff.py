@@ -17,11 +17,6 @@ Inputs:
 Adversarial cases also declare which tier they EXPECT, so a guard that
 becomes too weak (native where it must refuse) or too strict (interpreter
 where native is provably safe) both fail the run.
-
-The JIT now formats a provably-Bool print() argument as True/False (see
-compile_function.h / print_guard.h), so the four pure-bool adversarial
-cases below expect tier1, not tier0: native is correct for them now. Only
-genuinely mixed/uncertain kinds (float_print) still expect a fallback.
 """
 import pathlib
 import subprocess
@@ -34,6 +29,7 @@ FRONTEND = ROOT / "src" / "frontend" / "frontend.py"
 SUITES = [ROOT / "tests" / "programs", ROOT / "tests" / "typed_regression"]
 
 # name -> (ir_text, expected_tier_for_auto) ; tier is "tier0" or "tier1"
+# Bool-only prints run natively (True/False); float, mixed and unknown prints must fall back.
 ADVERSARIAL = {
     "bool_from_compare": ("""
 function main():

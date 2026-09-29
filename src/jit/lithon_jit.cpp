@@ -73,9 +73,10 @@ int main(int argc, char** argv) {
         jit::ExecutableBuffer exec(compiled.code);
         auto t1 = std::chrono::steady_clock::now();
 
-        auto it = compiled.function_offset.find("main");
+        auto it = compiled.function_offset.find("__main__");
+        if (it == compiled.function_offset.end()) it = compiled.function_offset.find("main");
         if (it == compiled.function_offset.end()) {
-            std::cerr << "error: no 'main' function in module\n";
+            std::cerr << "error: no '__main__' or 'main' function in module\n";
             return 1;
         }
 

@@ -31,6 +31,7 @@ struct OptimizeStats {
     int folded = 0;
     int branches_folded = 0;
     int dead_removed = 0;
+    int tail_calls = 0;
 };
 
 inline void fold_constants(lithon::ir::Function& fn, OptimizeStats& stats) {
@@ -175,8 +176,54 @@ inline void eliminate_dead_code(lithon::ir::Function& fn, OptimizeStats& stats) 
     }
 }
 
+
+// Self tail calls become loops. The frontend emits `return f(...)` as
+//     %r = call f, a0, a1 ; return %r
+// which is rewritten to
+//     store p0, a0 ; store p1, a1 ; jump <entry block>
+// Argument values are %N temporaries already computed before the call, so
+// storing them one after another cannot read a parameter that was just
+// overwritten. The prologue is emitted before the entry block, so the jump
+// re-enters at the right place: the parameters live in their variables (a
+// register when promoted), exactly as after a real call. Stack use becomes
+// O(1) and the existing loop machinery (promotion weights, rotation) applies.
+inline void convert_self_tail_calls(lithon::ir::Function& fn, OptimizeStats& stats) {
+    using namespace lithon::ir;
+    if (fn.blocks.empty()) return;
+    const std::string entry = fn.blocks.front().label;
+    for (auto& block : fn.blocks) {
+        auto& v = block.instrs;
+        for (size_t k = 0; k + 1 < v.size(); ++k) {
+            const Instr& call = v[k];
+            const Instr& ret = v[k + 1];
+            if (call.op != Op::Call || call.name != fn.name) continue;
+            if (call.result == kInvalidValue || call.args.size() != fn.params.size()) continue;
+            if (ret.op != Op::Return || ret.args.size() != 1 || ret.args[0] != call.result) continue;
+
+            std::vector<Instr> rewritten(v.begin(), v.begin() + k);
+            for (size_t j = 0; j < fn.params.size(); ++j) {
+                Instr st;
+                st.op = Op::Store;
+                st.result = kInvalidValue;
+                st.name = fn.params[j];
+                st.args.push_back(call.args[j]);
+                rewritten.push_back(st);
+            }
+            Instr jmp;
+            jmp.op = Op::Jump;
+            jmp.result = kInvalidValue;
+            jmp.name = entry;
+            rewritten.push_back(jmp);
+            v = std::move(rewritten);   // everything after the old return was dead
+            ++stats.tail_calls;
+            break;
+        }
+    }
+}
+
 inline OptimizeStats optimize_function(lithon::ir::Function& fn) {
     OptimizeStats stats;
+    convert_self_tail_calls(fn, stats);
     fold_constants(fn, stats);
     eliminate_dead_code(fn, stats);
     return stats;
