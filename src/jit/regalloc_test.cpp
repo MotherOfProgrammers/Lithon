@@ -53,6 +53,11 @@ static bool is_temp_pool_reg(Reg r) {
     return false;
 }
 
+static bool is_callee_saved_pool_reg(Reg r) {
+    for (Reg p : abi::kPromotionPool) if (p == r) return true;
+    return false;
+}
+
 int main() {
     // ---- lightly used params are NOT promoted (save/restore would cost more) ----
     {
@@ -140,7 +145,10 @@ int main() {
         }
     }
 
-    // ---- a temp live across a call must not sit in a caller-saved register ----
+    // ---- a temp live across a call must not sit in a CALLER-SAVED register ----
+    // It used to be spilled to the stack, which is correct but costs a store
+    // and a reload straddling the call. A callee-saved register no promoted
+    // variable is using is strictly better, and is what it gets now.
     {
         Function fn;
         fn.name = "spans_call";
@@ -148,9 +156,48 @@ int main() {
         b0.instrs = {const_int(0, 7), instr(Op::Call, kInvalidValue, {}, "other"),
                      instr(Op::Add, 1, {0, 0}), instr(Op::Return, kInvalidValue, {1})};
         fn.blocks = {b0};
+
         RegisterAllocator alloc(fn);
-        check(!alloc.temp_location(0).in_register, "value defined before and used after a call is spilled");
+        const auto& loc = alloc.temp_location(0);
+        check(loc.in_register, "a call-spanning temp borrows a register rather than the stack");
+        check(!is_temp_pool_reg(loc.reg),
+              "...and that register is callee-saved, so the call cannot destroy it");
+        check(!loc.in_register || is_callee_saved_pool_reg(loc.reg),
+              "...and it comes from the callee-saved pool");
         check(alloc.temp_location(1).in_register, "the value computed after the call needs no spill");
+        check(alloc.frame_size() % 16 == 0, "frame size is 16-byte aligned");
+
+        // The borrow is only legal if the prologue saves it and every Return
+        // restores it -- otherwise the CALLER's register is destroyed.
+        bool saved = false;
+        for (const auto& s : alloc.callee_saved_slots()) if (s.first == loc.reg) saved = true;
+        check(saved, "the borrowed register is in callee_saved_slots(), so it is saved and restored");
+    }
+
+    // ---- a promoted variable's register is never lent to a temp ----
+    {
+        Function fn;
+        fn.name = "promoted_then_call";
+        BasicBlock b0; b0.label = "block0";
+        b0.instrs = {instr(Op::Load, 0, {}, "hot"), const_int(1, 7),
+                     instr(Op::Call, kInvalidValue, {}, "other"),
+                     instr(Op::Add, 2, {0, 1}), instr(Op::Return, kInvalidValue, {2})};
+        // Make "hot" promoted by loading it several times, as select_promoted_
+        // variables would. Inserted BEFORE fn.blocks is assigned, since that
+        // assignment copies the block.
+        for (int i = 0; i < 4; ++i)
+            b0.instrs.insert(b0.instrs.begin() + 1, instr(Op::Load, 10 + static_cast<unsigned>(i), {}, "hot"));
+        fn.blocks = {b0};
+
+        RegisterAllocator alloc(fn);
+        Reg hot = alloc.variable_register("hot");
+        check(alloc.variable_in_register("hot"), "hot variable is promoted");
+        bool clash = false;
+        for (ValueId id : {0u, 1u, 2u}) {
+            const auto& l = alloc.temp_location(id);
+            if (l.in_register && l.reg == hot) clash = true;
+        }
+        check(!clash, "no temporary shares the promoted variable's register");
     }
 
     // ---- more hot variables than promotion registers ----

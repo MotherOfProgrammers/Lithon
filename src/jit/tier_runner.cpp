@@ -57,10 +57,10 @@ void run_interpreter(const lithon::ir::Module& m) {
 
 // Returns false (and prints why) if native compilation failed, so the
 // caller can fall back. Nothing has executed when this returns false.
-bool run_native(const lithon::ir::Module& m) {
+bool run_native(const lithon::ir::Module& m, lithon::jit::CompileOptions options = {}) {
     lithon::jit::CompiledModule compiled;
     try {
-        compiled = lithon::jit::compile_module(m);
+        compiled = lithon::jit::compile_module(m, options);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[tier0] native compile refused: %s\n", e.what());
         return false;
@@ -96,16 +96,26 @@ bool run_native(const lithon::ir::Module& m) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 3) {
-        std::cerr << "usage: tier_runner <file.ir> [--interp|--native|--auto|--strict]\n";
+    if (argc < 2) {
+        std::cerr << "usage: tier_runner <file.ir> [--interp|--native|--auto|--strict]\n"
+                     "                  [--no-lsr] [--unroll-diamonds]\n";
         return 2;
     }
     const std::string path = argv[1];
-    const std::string mode = argc == 3 ? argv[2] : "--auto";
-    if (mode != "--interp" && mode != "--native" && mode != "--auto" &&
-        mode != "--strict") {
-        std::cerr << "unknown mode: " << mode << "\n";
-        return 2;
+    std::string mode = "--auto";
+    lithon::jit::CompileOptions options;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--interp" || a == "--native" || a == "--auto" || a == "--strict") {
+            mode = a;
+        } else if (a == "--no-lsr") {
+            options.strength_reduce = false;
+        } else if (a == "--unroll-diamonds") {
+            options.unroll_diamonds = true;
+        } else {
+            std::cerr << "unknown argument: " << a << "\n";
+            return 2;
+        }
     }
 
     std::ifstream file(path);
@@ -142,7 +152,7 @@ int main(int argc, char** argv) {
         }
 
         // --native forces the JIT with no guard (used to demonstrate the divergence)
-        if (!run_native(module)) {
+        if (!run_native(module, options)) {
             if (mode == "--strict") {
                 std::fputs("[strict] refused: native compilation failed\n", stderr);
                 return 3;

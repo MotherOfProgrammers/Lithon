@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
@@ -61,20 +62,20 @@ inline PromotionMap select_promoted_variables(const lithon::ir::Function& fn) {
 class RegisterAllocator {
 public:
     // Convenience form: automatic weighted promotion, no virtual temps.
-    // `folds` is forwarded to LivenessAnalysis so a folded-away constant
-    // (see liveness.h) never costs a register or a spill slot it will
-    // never actually use. Covers both call shapes seen in this codebase
-    // to date: RegisterAllocator(fn) and RegisterAllocator(fn, &folds).
-    explicit RegisterAllocator(const lithon::ir::Function& fn,
-                               const ImmediateFolds* folds = nullptr)
-        : RegisterAllocator(fn, select_promoted_variables(fn), {}, folds) {}
+    // Nothing is virtual, so every %N temporary gets a real location.
+    explicit RegisterAllocator(const lithon::ir::Function& fn)
+        : RegisterAllocator(fn, select_promoted_variables(fn), {}) {}
 
     // Full form: explicit control over which variables are promoted and
-    // which %N temporaries need no location at all.
+    // which %N temporaries need no location at all. `virtual_temps` is
+    // plan_function's set, threaded straight into LivenessAnalysis so a
+    // value with no run-time existence is excluded BEFORE ranges are
+    // computed, and used again here to leave it unallocated. One set, one
+    // source of truth, and the two uses cannot drift apart.
     RegisterAllocator(const lithon::ir::Function& fn, PromotionMap promoted,
-                      const std::unordered_set<lithon::ir::ValueId>& virtual_temps,
-                      const ImmediateFolds* folds = nullptr)
-        : fn_(fn), liveness_(fn, folds), promoted_(std::move(promoted)) {
+                      const VirtualTemps& virtual_temps, bool borrow = true)
+        : fn_(fn), liveness_(fn, virtual_temps), promoted_(std::move(promoted)),
+          borrow_(borrow) {
         assign_variable_slots();
         assign_callee_saved_slots();
         find_call_indices();
@@ -138,6 +139,7 @@ private:
     std::unordered_map<std::string, int> variable_offsets_;
     std::vector<std::string> variable_order_;
     std::vector<std::pair<Reg, int>> callee_saved_slots_;
+    bool borrow_ = true;
     std::unordered_map<lithon::ir::ValueId, ValueLocation> temp_locations_;
     std::vector<int> call_indices_;
     int next_slot_offset_ = 0;
@@ -146,6 +148,41 @@ private:
     int allocate_new_slot() {
         next_slot_offset_ -= 8;
         return next_slot_offset_;
+    }
+
+    static bool is_temp_pool_reg(Reg r) {
+        for (Reg t : abi::kTempPool) if (t == r) return true;
+        return false;
+    }
+
+    // The lowest-indexed member of `pool` present in `free`, so allocation
+    // output is deterministic run to run. `free` must be non-empty: there is
+    // no sentinel register to return, because RAX is itself a legitimate
+    // member of kTempPool and would be indistinguishable from "none".
+    template <size_t N>
+    static Reg take_lowest(const std::vector<Reg>& free, const std::array<Reg, N>& pool) {
+        return *std::min_element(free.begin(), free.end(), [&](Reg a, Reg b) {
+            auto rank = [&](Reg r) {
+                for (size_t i = 0; i < N; ++i) if (pool[i] == r) return i;
+                return N;
+            };
+            return rank(a) < rank(b);
+        });
+    }
+
+    // Callee-saved registers no promoted variable is using. A promoted
+    // variable's register is reserved for the whole function, so it can
+    // never also hold a temporary. borrow_ is false only to A/B this one
+    // change in benchmarks; production always borrows.
+    std::vector<Reg> callee_saved_borrowable() const {
+        std::vector<Reg> out;
+        if (!borrow_) return out;
+        for (Reg r : abi::kPromotionPool) {
+            bool taken = false;
+            for (const auto& kv : promoted_) if (kv.second == r) taken = true;
+            if (!taken) out.push_back(r);
+        }
+        return out;
     }
 
     // A stack slot for every variable that did NOT get promoted --
@@ -205,7 +242,7 @@ private:
         return false;
     }
 
-    void assign_temporary_locations(const std::unordered_set<lithon::ir::ValueId>& virtual_temps) {
+    void assign_temporary_locations(const VirtualTemps& virtual_temps) {
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries;
         for (const auto& kv : liveness_.ranges()) {
             if (!virtual_temps.count(kv.first)) entries.push_back(kv);
@@ -215,7 +252,20 @@ private:
                                                     : a.first < b.first;
         });
 
+        // Two pools, because a %N temp has two different constraints. A temp
+        // that does not cross a call can live anywhere in kTempPool: those
+        // are caller-saved, and the only thing that matters is that they
+        // stay clear of argument registers and the r10/r11 scratch. A temp
+        // that DOES cross a call cannot go there at all -- the callee is
+        // entitled to destroy every one of them. Spilling it to the stack is
+        // always correct but costs a store and a reload straddling the call,
+        // which is a real memory round-trip, not a fused one. Any callee-saved
+        // register not already holding a promoted variable is strictly
+        // better: the call cannot touch it, and the prologue/epilogue already
+        // save and restore the promoted set, so extending that list costs one
+        // store and one load for the entire function.
         std::vector<Reg> free_regs(abi::kTempPool.begin(), abi::kTempPool.end());
+        std::vector<Reg> free_across_calls = callee_saved_borrowable();
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> active;
 
         for (const auto& entry : entries) {
@@ -226,25 +276,31 @@ private:
                 if (a.second.last_use < range.birth) {
                     auto loc_it = temp_locations_.find(a.first);
                     if (loc_it != temp_locations_.end() && loc_it->second.in_register) {
-                        free_regs.push_back(loc_it->second.reg);
+                        // Return a borrowed callee-saved register to its own
+                        // pool; it must never re-enter the temp pool, or a
+                        // later temp would be handed a register a call can
+                        // destroy.
+                        if (is_temp_pool_reg(loc_it->second.reg)) free_regs.push_back(loc_it->second.reg);
+                        else free_across_calls.push_back(loc_it->second.reg);
                     }
                     return true;
                 }
                 return false;
             }), active.end());
 
-            if (!spans_a_call(range) && !free_regs.empty()) {
-                // Lowest-numbered pool order first, for deterministic output.
-                auto pick = std::min_element(free_regs.begin(), free_regs.end(), [](Reg a, Reg b) {
-                    auto rank = [](Reg r) {
-                        for (size_t i = 0; i < abi::kTempPool.size(); ++i)
-                            if (abi::kTempPool[i] == r) return i;
-                        return abi::kTempPool.size();
-                    };
-                    return rank(a) < rank(b);
-                });
-                Reg r = *pick;
-                free_regs.erase(pick);
+            if (spans_a_call(range) && !free_across_calls.empty()) {
+                // A call cannot destroy a callee-saved register, so this is
+                // strictly better than the stack round-trip it replaces.
+                Reg r = take_lowest(free_across_calls, abi::kPromotionPool);
+                free_across_calls.erase(std::find(free_across_calls.begin(), free_across_calls.end(), r));
+                temp_locations_[id] = ValueLocation{true, r, -1};
+                // Saving it is what makes the borrow legal: the prologue now
+                // stores it and every Return reloads it, so the caller's
+                // value survives the call.
+                callee_saved_slots_.push_back({r, allocate_new_slot()});
+            } else if (!spans_a_call(range) && !free_regs.empty()) {
+                Reg r = take_lowest(free_regs, abi::kTempPool);
+                free_regs.erase(std::find(free_regs.begin(), free_regs.end(), r));
                 temp_locations_[id] = ValueLocation{true, r, -1};
             } else {
                 temp_locations_[id] = ValueLocation{false, Reg::RAX, allocate_new_slot()};

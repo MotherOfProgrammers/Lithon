@@ -203,6 +203,8 @@ class IRBuilder:
         self.start_block(merge_label)
 
     def build_while(self, node):
+        if node.orelse:
+            raise NotImplementedError("while/else is not supported (the else clause would be silently dropped)")
         header_label = self.reserve_label()
         body_label = self.reserve_label()
         exit_label = self.reserve_label()
@@ -221,6 +223,8 @@ class IRBuilder:
         self.start_block(exit_label)
 
     def build_for(self, node):
+        if node.orelse:
+            raise NotImplementedError("for/else is not supported (the else clause would be silently dropped)")
         if not isinstance(node.target, ast.Name):
             raise NotImplementedError("only a single name for-target is supported")
         if not (isinstance(node.iter, ast.Call)

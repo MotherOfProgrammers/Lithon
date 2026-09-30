@@ -2,8 +2,8 @@
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
-#include "imm_fold.h"
 #include "ir/ir.h"
 
 namespace lithon::jit {
@@ -77,6 +77,16 @@ struct LiveRange {
     int last_use = -1;
 };
 
+// Values with NO run-time existence, as decided by plan_function
+// (compile_function.h). Each one is generated as an immediate operand,
+// as a copy-free reference to a promoted variable's register, or fused
+// into the single instruction that consumes it -- so no register and no
+// stack slot is ever allocated for it. plan_function already proves this
+// for EVERY such value (Const, Alias, FusedCmp, FusedStore), which is why
+// the set lives here rather than in a second, narrower analysis that
+// could only ever agree with codegen by coincidence.
+using VirtualTemps = std::unordered_set<lithon::ir::ValueId>;
+
 // Linear live ranges over the flat instruction order, corrected for
 // loops: a value defined BEFORE a loop and used INSIDE it is read
 // again on every iteration, so it must stay live until the loop's
@@ -88,28 +98,29 @@ struct LiveRange {
 // drift apart.
 class LivenessAnalysis {
 public:
-    // `folds`, when given, marks ConstInt values that will never be
-    // materialized into a register or stack slot at all (compile_
-    // function.h folds them straight into one instruction's immediate
-    // operand). Such an id gets NO live range here -- not at its
-    // definition, and it is not treated as a "use" at its one
-    // reference either -- so it can never occupy allocator pressure or
-    // be dragged across a loop by the extension below.
+    // `virtual_temps` must be plan_function's set, passed in at
+    // construction -- NOT filtered afterwards. A virtual temp gets NO
+    // live range here: not at its definition, and it is not counted as
+    // a "use" at its references either. That matters most for the loop
+    // extension below, which would otherwise drag a value that generates
+    // zero instructions across an entire loop and charge it against the
+    // small temp register pool. Skipping it before range computation is
+    // the whole point; filtering the finished ranges would leave the
+    // wasted work behind, next to the very mechanism meant to avoid it.
     explicit LivenessAnalysis(const lithon::ir::Function& fn,
-                              const ImmediateFolds* folds = nullptr) {
+                              const VirtualTemps& virtual_temps = VirtualTemps{}) {
         int idx = 0;
         for (const auto& block : fn.blocks) {
             for (const auto& instr : block.instrs) {
-                bool result_folded = folds && instr.result != lithon::ir::kInvalidValue &&
-                                     folds->folded(instr.result);
-                if (instr.result != lithon::ir::kInvalidValue && !result_folded) {
+                if (instr.result != lithon::ir::kInvalidValue &&
+                    !virtual_temps.count(instr.result)) {
                     ranges_[instr.result].birth = idx;
                     if (ranges_[instr.result].last_use < idx) {
                         ranges_[instr.result].last_use = idx;
                     }
                 }
                 for (auto arg : instr.args) {
-                    if (folds && folds->folded(arg)) continue;   // not a real use: no register ever holds it
+                    if (virtual_temps.count(arg)) continue;   // not a real use: no register ever holds it
                     auto it = ranges_.find(arg);
                     if (it != ranges_.end() && it->second.last_use < idx) {
                         it->second.last_use = idx;

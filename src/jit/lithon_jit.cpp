@@ -34,21 +34,31 @@ static bool module_has_any_typing(const ir::Module& module) {
 }
 
 int main(int argc, char** argv) {
-    std::string path;
+    std::string path, dump_code_path;
     bool dump_hex = false, stats = false;
     jit::CompileOptions options;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--dump-hex")) dump_hex = true;
         else if (!std::strcmp(argv[i], "--stats")) stats = true;
+        else if (!std::strcmp(argv[i], "--dump-code") && i + 1 < argc) dump_code_path = argv[++i];
         else if (!std::strcmp(argv[i], "--no-opt")) options.optimize = false;
         else if (!std::strcmp(argv[i], "--no-promote")) options.promote_registers = false;
         else if (!std::strcmp(argv[i], "--no-rotate")) options.rotate_loops = false;
         else if (!std::strncmp(argv[i], "--unroll=", 9)) options.unroll_factor = std::atoi(argv[i] + 9);
+        else if (!std::strcmp(argv[i], "--unroll-diamonds")) options.unroll_diamonds = true;
+        else if (!std::strcmp(argv[i], "--no-lsr")) options.strength_reduce = false;
         else path = argv[i];
     }
     if (path.empty()) {
         std::cerr << "usage: lithon_jit <ir_file> [--dump-hex] [--stats]\n"
-                     "                  [--no-opt] [--no-promote] [--no-rotate] [--unroll=N]\n";
+                     "                  [--no-opt] [--no-promote] [--no-rotate] [--unroll=N]\n"
+                     "                  [--no-lsr] [--unroll-diamonds] (opt in to unrolling if/else diamonds;\n"
+                     "                   correct but measured slower on Sandy Bridge, hence off by default)\n"
+                     "                  [--dump-code <path>]\n"
+                     "       --dump-code writes the raw emitted machine code (the whole buffer,\n"
+                     "       unlike --dump-hex's 64-byte preview) to <path> for external tools --\n"
+                     "       e.g. objdump -D -b binary -mi386:x86-64 -M intel <path>, which is\n"
+                     "       what tools/check_stack_alignment.py does. Compiles but does not run.\n";
         return 1;
     }
 
@@ -70,6 +80,21 @@ int main(int argc, char** argv) {
 
         auto t0 = std::chrono::steady_clock::now();
         jit::CompiledModule compiled = jit::compile_module(module, options);
+
+        if (!dump_code_path.empty()) {
+            std::ofstream out(dump_code_path, std::ios::binary);
+            if (!out) { std::cerr << "error: cannot write " << dump_code_path << "\n"; return 1; }
+            out.write(reinterpret_cast<const char*>(compiled.code.data()),
+                      static_cast<std::streamsize>(compiled.code.size()));
+            // Exact function boundaries, so an external tool (e.g.
+            // tools/check_stack_alignment.py) can seed rsp=0 at each
+            // function's first byte instead of pattern-matching prologues.
+            for (const auto& kv : compiled.function_offset) {
+                std::cout << kv.first << " " << kv.second << "\n";
+            }
+            return 0;   // dump-only: compiled code is never executed
+        }
+
         jit::ExecutableBuffer exec(compiled.code);
         auto t1 = std::chrono::steady_clock::now();
 

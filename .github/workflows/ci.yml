@@ -81,6 +81,8 @@ jobs:
           g++ -std=c++20 -Wall -Wextra -Isrc -o compile_module_fib_test src/jit/compile_module_fib_test.cpp
           g++ -std=c++20 -O2 -Isrc -o benchmark_fib src/jit/benchmark_fib.cpp src/interpreter/interpreter.cpp
           g++ -std=c++20 -Wall -Wextra -Isrc -o compile_module_bool_print_test src/jit/compile_module_bool_print_test.cpp
+          g++ -std=c++20 -Wall -Wextra -Isrc -o compile_function_diamond_test src/jit/compile_function_diamond_test.cpp
+          g++ -std=c++20 -Wall -Wextra -Isrc -Isrc/jit -o optimize_lsr_test src/jit/optimize_lsr_test.cpp src/ir/text_parser.cpp
 
       - name: Execute Liveness & Register Allocation Tests
         run: |
@@ -93,3 +95,5 @@ jobs:
           ./compile_module_fib_test
           ./benchmark_fib
           ./compile_module_bool_print_test
+          ./compile_function_diamond_test
+          ./optimize_lsr_test

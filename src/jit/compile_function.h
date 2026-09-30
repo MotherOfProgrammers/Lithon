@@ -74,9 +74,23 @@ static const char kBoolFalseLiteral[] = "False\n";
 
 struct CompileOptions {
     bool optimize = true;          // constant folding + dead-code elimination
+    bool strength_reduce = true;   // invariant*IV -> repeated add (needs optimize)
     bool promote_registers = true; // keep hot variables in registers
+    // Let a temporary that is live across a call borrow a callee-saved
+    // register no promoted variable is using, instead of living on the stack.
+    bool borrow_callee_saved = true;
     bool rotate_loops = true;      // duplicate small loop headers at the back edge
     int unroll_factor = 4;         // copies of a simple loop body per back edge (1 = off)
+    // Also unroll loops whose body is an if/else diamond. Off by default: it is
+    // correct and it is what `--diamond` fuzzes, but it measured consistently
+    // SLOWER than not unrolling on Sandy Bridge -- 10% on a tight
+    // if/else-with-multiply loop, 3.6% with a heavier body. A diamond's
+    // if/else test is irreducible, so unrolling cannot remove a branch per
+    // iteration the way it does for a straight-line body; it only amortises
+    // the back edge, while the four copies inflate the loop ~2x and cost more
+    // in the loop buffer / uop cache than the saved back edge is worth.
+    // Straight-line unrolling above is the variant that pays.
+    bool unroll_diamonds = false;
 };
 
 struct CompiledModule {
@@ -95,7 +109,10 @@ struct TempInfo {
 
 struct FunctionPlan {
     std::unordered_map<lithon::ir::ValueId, TempInfo> info;
-    std::unordered_set<lithon::ir::ValueId> virtual_temps;
+    // The single source of truth for "this value never occupies a register":
+    // every id marked Const/Alias/FusedCmp/FusedStore below. Liveness and
+    // register allocation both consume this exact set (see liveness.h).
+    VirtualTemps virtual_temps;
     std::vector<std::vector<uint8_t>> skip_instr;   // [block][pos]: instruction fused away
 };
 
@@ -220,6 +237,96 @@ enum : unsigned {
     kStopBeforeTerminator = 2, // emit everything except the block's final Jump
     kExitOnlyBranch = 4        // Branch: jump out when false, fall through when true
 };
+constexpr size_t kNoLocal = static_cast<size_t>(-1);
+
+// Where a Branch should land when its block is being inlined into a
+// straight-line body. kNoLocal on both fields means "use the block's real
+// IR targets". A Branch may set at most one.
+struct LocalBranch {
+    size_t on_true = kNoLocal;      // jcc  cond  -> here
+    size_t on_false = kNoLocal;     // jcc !cond  -> here
+    std::string exit_label;         // jcc !cond  -> this real IR block
+    bool active() const {
+        return on_true != kNoLocal || on_false != kNoLocal || !exit_label.empty();
+    }
+};
+
+// Recognises the loop shape the aggressive unroller handles:
+//
+//     H:  test; branch -> D, exit          (loop header)
+//     D:  test; branch -> A, E             (the diamond)
+//     A:  body; jump B
+//     E:  body; jump B
+//     B:  latch; jump H
+//
+// A and E must be the only predecessors of B, and D the only predecessor of A
+// and E, so inlining all four into one straight-line body duplicates no work
+// and skips none. Everything else is rejected.
+struct DiamondUnroll {
+    size_t header = 0;     // H
+    size_t diamond = 0;    // D
+    size_t arm_then = 0;   // A
+    size_t arm_else = 0;   // E
+    size_t latch = 0;      // B
+    std::string exit_label;
+};
+inline bool match_diamond_unroll(const lithon::ir::Function& fn,
+                                 const std::unordered_map<std::string, size_t>& block_index,
+                                 size_t latch, DiamondUnroll& out) {
+    using namespace lithon::ir;
+    if (latch == 0 || latch >= fn.blocks.size()) return false;
+    if (!is_unrollable_body(fn.blocks[latch])) return false;
+    const Instr& back = fn.blocks[latch].instrs.back();
+    if (back.op != Op::Jump) return false;
+    auto hit = block_index.find(back.name);
+    if (hit == block_index.end() || hit->second == 0 || hit->second >= latch) return false;
+    const size_t header = hit->second;
+    if (!is_rotatable_header(fn.blocks[header])) return false;
+    auto ht = branch_targets(fn.blocks[header].instrs.back());
+    if (ht.size() != 2 || ht[0] == ht[1]) return false;
+    auto dit = block_index.find(ht[0]);
+    if (dit == block_index.end() || dit->second >= latch) return false;
+    const size_t diamond = dit->second;
+    if (!is_rotatable_header(fn.blocks[diamond])) return false;
+    auto dt = branch_targets(fn.blocks[diamond].instrs.back());
+    if (dt.size() != 2 || dt[0] == dt[1]) return false;
+    auto at = block_index.find(dt[0]), et = block_index.find(dt[1]);
+    if (at == block_index.end() || et == block_index.end()) return false;
+    const size_t arm_then = at->second, arm_else = et->second;
+    if (arm_then >= latch || arm_else >= latch || arm_then == arm_else) return false;
+    for (size_t arm : {arm_then, arm_else}) {
+        if (!is_unrollable_body(fn.blocks[arm])) return false;
+        if (fn.blocks[arm].instrs.back().name != fn.blocks[latch].label) return false;
+    }
+    // Sole-predecessor checks: the inlined body must be entered from exactly
+    // the block we inline it after, or the arms would run on paths that never
+    // tested the diamond.
+    std::unordered_map<std::string, std::vector<size_t>> preds;
+    for (size_t b = 0; b < fn.blocks.size(); ++b)
+        for (const std::string& t : branch_targets(fn.blocks[b].instrs.back()))
+            preds[t].push_back(b);
+    auto only_pred = [&](const std::string& label, size_t want) {
+        auto p = preds.find(label);
+        return p != preds.end() && p->second.size() == 1 && p->second[0] == want;
+    };
+    if (!only_pred(fn.blocks[arm_then].label, diamond)) return false;
+    if (!only_pred(fn.blocks[arm_else].label, diamond)) return false;
+    if (!only_pred(fn.blocks[latch].label, latch)) {
+        // B is reached from both arms, so it has two predecessors; what must
+        // hold is that those are exactly A and E.
+        auto p = preds.find(fn.blocks[latch].label);
+        if (p == preds.end() || p->second.size() != 2) return false;
+        if (std::find(p->second.begin(), p->second.end(), arm_then) == p->second.end()) return false;
+        if (std::find(p->second.begin(), p->second.end(), arm_else) == p->second.end()) return false;
+    }
+    out.header = header;
+    out.diamond = diamond;
+    out.arm_then = arm_then;
+    out.arm_else = arm_else;
+    out.latch = latch;
+    out.exit_label = ht[1];
+    return true;
+}
 
 } // namespace detail
 
@@ -258,12 +365,17 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         }
 
         Function fn = original_fn;
-        if (options.optimize) optimize_function(fn);
+        if (options.optimize) {
+            OptimizePasses passes;
+            passes.strength_reduce = options.strength_reduce;
+            optimize_function(fn, passes);
+        }
 
         PromotionMap promoted = options.promote_registers ? select_promoted_variables(fn)
                                                           : PromotionMap{};
         detail::FunctionPlan plan = detail::plan_function(fn, promoted);
-        RegisterAllocator alloc(fn, promoted, plan.virtual_temps);
+        RegisterAllocator alloc(fn, promoted, plan.virtual_temps,
+                                options.borrow_callee_saved);
 
         constexpr Reg kL = abi::kScratchLeft;
         constexpr Reg kR = abi::kScratchRight;
@@ -369,11 +481,25 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             }
         };
 
+        // Local join points for the aggressive unroller: a target that is a
+        // position in the emitted stream rather than an IR label, bound once
+        // the stream has been extended past it.
+        struct PendingLocalPatch {
+            JumpPatch patch;
+            size_t local_id;
+        };
+        std::vector<PendingLocalPatch> pending_locals;
+        std::unordered_map<size_t, size_t> local_offsets;
+        size_t next_local = 0;
+        auto new_local = [&]() { return next_local++; };
+        auto bind_local = [&](size_t id) { local_offsets[id] = code.size(); };
+
         // Emits block `bi`'s instructions. `next_label` is the label of the
         // block that will physically follow the emitted code (used to elide
-        // jumps to the fall-through block).
-        std::function<void(size_t, const std::string&, unsigned)> emit_block_body =
-            [&](size_t bi, const std::string& next_label, unsigned flags) {
+        // jumps to the fall-through block). `then_local`/`else_local` are
+        // local join points used instead of the block's real branch targets.
+        std::function<void(size_t, const std::string&, unsigned, detail::LocalBranch)> emit_block_body_fn =
+            [&](size_t bi, const std::string& next_label, unsigned flags, detail::LocalBranch lb) {
             const BasicBlock& block = fn.blocks[bi];
             const bool allow_rotate = (flags & detail::kAllowRotate) != 0;
             for (size_t pos = 0; pos < block.instrs.size(); ++pos) {
@@ -527,7 +653,18 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                         } else {
                             emit_test_reg_reg(code, read_left(cond_id));
                         }
-                        if (flags & detail::kExitOnlyBranch) {
+                        if (lb.active()) {
+                            // This block was inlined, so its targets are
+                            // positions in this straight-line body rather than
+                            // IR blocks. Whichever arm is left unset simply
+                            // falls through to the next thing emitted.
+                            if (lb.on_false != detail::kNoLocal)
+                                pending_locals.push_back({emit_jcc_rel32(code, invert(cond)), lb.on_false});
+                            if (lb.on_true != detail::kNoLocal)
+                                pending_locals.push_back({emit_jcc_rel32(code, cond), lb.on_true});
+                            if (!lb.exit_label.empty() && lb.exit_label != next_label)
+                                pending_blocks.push_back({emit_jcc_rel32(code, invert(cond)), lb.exit_label});
+                        } else if (flags & detail::kExitOnlyBranch) {
                             pending_blocks.push_back({emit_jcc_rel32(code, invert(cond)), targets[1]});
                         } else {
                             emit_branch_to(cond, targets[0], targets[1], next_label);
@@ -543,7 +680,7 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                             // Loop rotation: re-test the loop condition here instead of
                             // jumping back to the header, so each iteration executes one
                             // conditional jump instead of a conditional plus an unconditional.
-                            emit_block_body(it->second, next_label, 0);
+                            emit_block_body_fn(it->second, next_label, 0, detail::LocalBranch{});
                         } else {
                             pending_blocks.push_back({emit_jmp_rel32(code), instr.name});
                         }
@@ -611,9 +748,18 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                         pending_calls.push_back({to_callee, instr.name});
 
                         if (instr.result != kInvalidValue) {
-                            Reg dst = compute_dest(instr.result);
-                            if (dst != Reg::RAX) emit_mov_reg_reg(code, dst, Reg::RAX);
-                            commit_result(instr.result, dst);
+                            // A spilled call result: the callee left its
+                            // return value in RAX and nothing has written RAX
+                            // since, so store it into the slot directly.
+                            // compute_dest() would hand back kL instead and
+                            // cost an extra register-to-register copy through
+                            // scratch for no reason.
+                            const ValueLocation& loc = alloc.temp_location(instr.result);
+                            if (loc.in_register) {
+                                if (loc.reg != Reg::RAX) emit_mov_reg_reg(code, loc.reg, Reg::RAX);
+                            } else {
+                                emit_store_rbp_offset(code, Reg::RAX, loc.stack_slot);
+                            }
                         }
                         break;
                     }
@@ -636,9 +782,88 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             }
         };
 
+        auto emit_block_body = [&](size_t bi, const std::string& next_label, unsigned flags,
+                                   detail::LocalBranch lb = detail::LocalBranch{}) {
+            emit_block_body_fn(bi, next_label, flags, lb);
+        };
+
+        // Aggressive diamond unroll, planned before anything is emitted.
+        //
+        // The whole loop is emitted as one rotated unit at its header:
+        //
+        //   rotate: <H test>              jge exit
+        //           <copy k: D, A/E, B>   <H test>   jge exit
+        //           ...                                    ...
+        //           <copy k+U-1: D, A/E, B><H test>   jl rotate / jge exit
+        //
+        // D, both arms and B are then skipped by the emission loop, because
+        // after this inlining they have no predecessor outside the copies and
+        // no successor that is not a label we own. Nothing else in the
+        // function may reach them -- match_diamond_unroll() proved that by
+        // checking sole predecessors -- so skipping them cannot strand a
+        // jump. The entry copy is preceded by its own test, so a zero-trip
+        // loop still does no work, and every iteration is still tested
+        // individually, so any trip count stays exact.
+        std::unordered_map<size_t, detail::DiamondUnroll> diamond_at_header;
+        std::unordered_set<size_t> inlined_blocks;
+        if (options.rotate_loops && options.unroll_factor > 1 && options.unroll_diamonds) {
+            for (size_t latch = 1; latch < fn.blocks.size(); ++latch) {
+                detail::DiamondUnroll dia;
+                if (!detail::match_diamond_unroll(fn, block_index, latch, dia)) continue;
+                if (diamond_at_header.count(dia.header)) continue;   // first match wins
+                diamond_at_header.emplace(dia.header, dia);
+                inlined_blocks.insert(dia.diamond);
+                inlined_blocks.insert(dia.arm_then);
+                inlined_blocks.insert(dia.arm_else);
+                inlined_blocks.insert(latch);
+            }
+        }
+
         for (size_t bi = 0; bi < fn.blocks.size(); ++bi) {
             block_offset[fn.blocks[bi].label] = code.size();
             const std::string next_label = bi + 1 < fn.blocks.size() ? fn.blocks[bi + 1].label : "";
+
+            if (inlined_blocks.count(bi)) continue;   // already inside an unrolled copy
+
+            auto dia_it = diamond_at_header.find(bi);
+            if (dia_it != diamond_at_header.end()) {
+                const detail::DiamondUnroll& dia = dia_it->second;
+                const size_t rotate_id = new_local();
+                bind_local(rotate_id);
+                // Entry test: what the header would have done on the way in.
+                {
+                    detail::LocalBranch lb;
+                    lb.exit_label = dia.exit_label;
+                    emit_block_body(dia.header, next_label, 0u, lb);
+                }
+                for (int k = 0; k < options.unroll_factor; ++k) {
+                    // Per-copy join points, so each copy's "skip the else arm"
+                    // jump lands on that copy's own latch.
+                    const size_t else_id = new_local(), join_id = new_local();
+                    // D: the compare it fuses is emitted by its Branch case, so
+                    // D is emitted whole. On true the then arm is the
+                    // fall-through, which leaves one conditional jump and no
+                    // unconditional one on the common path.
+                    detail::LocalBranch dlb;
+                    dlb.on_false = else_id;
+                    emit_block_body(dia.diamond, "", 0u, dlb);
+                    emit_block_body(dia.arm_then, "", detail::kStopBeforeTerminator);
+                    pending_locals.push_back({emit_jmp_rel32(code), join_id});
+                    bind_local(else_id);
+                    emit_block_body(dia.arm_else, "", detail::kStopBeforeTerminator);
+                    bind_local(join_id);
+                    emit_block_body(dia.latch, "", detail::kStopBeforeTerminator);
+                    // H: duplicate the test. All but the last exit straight to
+                    // the loop exit and fall into the next copy; the last
+                    // jumps back to rotate_id, closing the loop.
+                    const bool last = (k + 1 == options.unroll_factor);
+                    detail::LocalBranch hlb;
+                    hlb.exit_label = dia.exit_label;
+                    if (last) hlb.on_true = rotate_id;
+                    emit_block_body(dia.header, next_label, 0u, hlb);
+                }
+                continue;
+            }
 
             // Unrolling: header H immediately precedes body B, H's branch
             // enters B or leaves the loop, and B is simple straight-line
@@ -668,6 +893,14 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             }
 
             emit_block_body(bi, next_label, detail::kAllowRotate);
+        }
+
+        for (const auto& p : pending_locals) {
+            auto it = local_offsets.find(p.local_id);
+            if (it == local_offsets.end()) {
+                throw std::runtime_error("compile_module: unbound local join point");
+            }
+            resolve_jump_patch(code, p.patch, it->second);
         }
 
         for (const auto& p : pending_blocks) {
