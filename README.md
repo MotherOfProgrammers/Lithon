@@ -397,7 +397,7 @@ honest next step is to move it out of that list.
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 6.9902 ms | 1487.4944 ms | 212.8× | 832040 |
+| fib(30) | 7.0111 ms | 1488.9332 ms | 212.4× | 832040 |
 
 **Status:** PASS
 
