@@ -470,7 +470,7 @@ Two more limits worth stating plainly, because a passing run can obscure both:
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 7.0111 ms | 1488.9332 ms | 212.4× | 832040 |
+| fib(30) | 7.0070 ms | 1468.0175 ms | 209.5× | 832040 |
 
 **Status:** PASS
 
