@@ -14,7 +14,7 @@ const EXAMPLES: readonly Example[] = [
     id: "fib",
     title: "Recursive fibonacci",
     note: "recursion · native tier-1",
-    code: `def fib(n: int) -> int:
+    code: `def fib(n: int[32]) -> int[32]:
     if n < 2:
         return n
     return fib(n - 1) + fib(n - 2)
@@ -24,10 +24,11 @@ print(fib(10))`,
   {
     id: "range",
     title: "Typed range loop",
-    note: "for-range · fixed int accumulator",
-    code: `total: int = 0
+    note: "for-range · fixed int[32] accumulator",
+    code: `total: int[32] = 0
+i: int[32] = 0
 
-for i in range(0, 10):
+for i in range(10):
     total = total + i
 
 print(total)`,
@@ -36,11 +37,11 @@ print(total)`,
     id: "nested",
     title: "Nested loop accumulator",
     note: "while + for · verified nesting",
-    code: `row: int = 1
-sum: int = 0
+    code: `row: int[32] = 1
+sum: int[32] = 0
 
 while row <= 3:
-    col: int = 1
+    col: int[32] = 1
     while col <= 3:
         sum = sum + row * col
         col = col + 1
@@ -49,9 +50,19 @@ while row <= 3:
 print(sum)`,
   },
   {
+    id: "float",
+    title: "Float arithmetic",
+    note: "float[64] · SSE2 native output",
+    code: `a: float[64] = 3.5
+b: float[64] = 2.0
+
+print(a + b)
+print(a * b)`,
+  },
+  {
     id: "untyped",
     title: "Untyped program",
-    note: "the verifier refuses to go native",
+    note: "no annotations · tier-0 fallback",
     code: `def double(n):
     return n * 2
 
@@ -64,7 +75,9 @@ type TabId = (typeof TABS)[number];
 
 const RUN_DELAY_MS = 500;
 const MAX_FIB_INDEX = 2000;
-const ANNOTATION_PATTERN = /:\s*(?:int|float|bool|str)\b/g;
+/* Matches the annotations the checker actually accepts: an explicit width for
+   int and float, and a bare `bool`, which takes no size parameter. */
+const ANNOTATION_PATTERN = /:\s*(?:(?:int|float)\s*\[\s*\d+\s*\]|bool\b)/g;
 const PRINTED_FIB_PATTERN = /print\s*\(\s*fib\s*\(\s*(\d+)\s*\)\s*\)/;
 const FIB_CALL_PATTERN = /fib\s*\(\s*(\d+)\s*\)/;
 
@@ -153,11 +166,11 @@ function initPlayground(): void {
 
     nodes.push(
       typed
-        ? makeLine("success", "✓ static flow verified")
-        : makeLine("muted", "○ static flow unverified — no explicit type annotations"),
+        ? makeLine("success", "✓ static flow verified · tier-1 native")
+        : makeLine("muted", "○ static flow unverified — would run on the tier-0 interpreter"),
       typed
         ? makeLine("success", `✓ ${plural(analysis.annotationCount, "fixed type annotation")} resolved`)
-        : makeLine("muted", "○ add an explicit type annotation to go native"),
+        : makeLine("muted", "○ annotate a binding — try `total: int[32] = 0`"),
       promptLine(),
     );
 

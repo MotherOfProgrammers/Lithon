@@ -31,6 +31,13 @@ const HAPTIC_CONFIRM_MS = [12, 26, 14];
 const TICK_FREQUENCY_HZ = 660;
 const TICK_DURATION_S = 0.06;
 const TICK_GAIN = 0.1;
+/* Hover sits a fifth above the click tick and well under its level: it has to
+   be distinguishable from the press without becoming the louder of the pair. */
+const HOVER_FREQUENCY_HZ = 880;
+const HOVER_DURATION_S = 0.035;
+const HOVER_GAIN = 0.035;
+/** Sweeping the cursor across a row of links would otherwise machine-gun ticks. */
+const HOVER_MIN_GAP_MS = 70;
 const CONFIRM_FREQUENCIES_HZ = [523.25, 783.99];
 const DISMISS_FREQUENCIES_HZ = [659.25, 493.88];
 const NOTE_DURATION_S = 0.14;
@@ -171,6 +178,10 @@ function playTick(): void {
   playSequence([TICK_FREQUENCY_HZ], TICK_GAIN, TICK_DURATION_S, 0);
 }
 
+function playHover(): void {
+  playSequence([HOVER_FREQUENCY_HZ], HOVER_GAIN, HOVER_DURATION_S, 0);
+}
+
 function playConfirm(): void {
   playSequence(CONFIRM_FREQUENCIES_HZ, CHIME_GAIN, NOTE_DURATION_S, NOTE_GAP_S);
 }
@@ -215,17 +226,21 @@ function springPress(target: HTMLElement, direction: "in" | "out"): void {
 }
 
 /** Anything clickable that is not one of the header controls answers with a
- *  tick too: sound on should wake the whole interface, not a quarter of it. */
+ *  tick too: sound on should wake the whole interface, not a quarter of it.
+ *  The contributor links are built at runtime from the GitHub API, so this
+ *  selector is matched by the delegated hook below rather than bound once. */
 const SOUND_TARGETS = [
   ".nav-links a",
   ".footer-links a",
-  ".social-links a",
+  ".contributors-link",
+  ".contributor-link",
   ".button",
   ".text-link",
   ".card-link",
   ".case-link",
   ".run-button",
   ".copy-button",
+  ".contributors-retry",
   ".roadmap-filter button",
   ".suggestion",
 ].join(", ");
@@ -288,6 +303,31 @@ export function initControlFeedback(
       if (target.closest(SOUND_TARGETS) === null) return;
       vibrate(HAPTIC_TICK_MS);
       playTick();
+    });
+
+    /* Hovering a control is the other half of the interaction, so it answers
+       too — but only when the pointer genuinely entered the control. */
+    let lastHoverAt = 0;
+
+    document.addEventListener("pointerover", (event) => {
+      if (!sound) return;
+      // Touch and pen synthesise a pointerover immediately before the click,
+      // which would double up on the press tick.
+      if (event.pointerType !== "mouse") return;
+      if (!(event.target instanceof Element)) return;
+
+      const entered = event.target.closest(SOUND_TARGETS);
+      if (entered === null) return;
+
+      // pointerover also fires when the cursor moves between a control's own
+      // descendants; relatedTarget tells the two cases apart.
+      const previous = event.relatedTarget;
+      if (previous instanceof Element && entered.contains(previous)) return;
+
+      const now = Date.now();
+      if (now - lastHoverAt < HOVER_MIN_GAP_MS) return;
+      lastHoverAt = now;
+      playHover();
     });
 
     document.addEventListener("animationend", (event) => {

@@ -125,11 +125,11 @@
           <p class="section-kicker">01 / Documentation</p>
           <h1>Know the path<br />from <em>source</em> to speed.</h1>
           <p class="page-hero-lede">
-            A focused guide to Lithon’s typed Python-flavored language, four-layer architecture, and zero-dependency
-            runtime.
+            How Lithon is built and run: the annotation grammar the verifier actually accepts, the two execution tiers,
+            and the gaps that are still open.
           </p>
           <div class="page-hero-meta">
-            <span>Python-flavored</span><span>Static flow verified</span><span>x86-64 native output</span>
+            <span>Mandatory static types</span><span>Dual-tier execution</span><span>Zero dependencies</span>
           </div>
         </div>
       </section>
@@ -141,7 +141,9 @@
             <a class="is-current" href="#quickstart" aria-current="true">Quickstart</a>
             <a href="#mental-model">Mental model</a>
             <a href="#types">Types &amp; flow</a>
+            <a href="#language">Language subset</a>
             <a href="#runtime">Runtime</a>
+            <a href="#limits">Honest limits</a>
           </aside>
 
           <div class="content-column">
@@ -149,37 +151,57 @@
               <span class="eyebrow-chip">Start here</span>
               <h2>Build once.<br /><span>Understand everything.</span></h2>
               <p>
-                Use the smallest possible loop to get a feel for the engine. Lithon expects your types to be clear before
-                it starts moving bytes.
+                There is no Makefile — CMake drives everything. The engine needs a toolchain, but no third-party libraries:
+                no LLVM, no runtime package to install. Python appears at exactly one step, turning a <code>.py</code> file
+                into IR; once IR exists the native program never touches CPython.
               </p>
               <div class="code-card">
-                <div class="code-card-bar"><i></i><span>terminal · first run</span></div>
-                <pre><span class="accent">$</span> git clone https://github.com/MotherOfProgrammers/Lithon.git
-<span class="accent">$</span> cd Lithon
-<span class="accent">$</span> make -j$(nproc)
-<span class="accent">$</span> ./lithon run examples/fib.py
-<span class="accent">✓</span> Static Flow Verifier: Passed (0 errors).</pre>
+                <div class="code-card-bar"><i></i><span>terminal · compile and run</span></div>
+                <pre><span class="accent">$</span> cmake -B build -DCMAKE_BUILD_TYPE=Release
+<span class="accent">$</span> cmake --build build -j$(nproc)
+<span class="accent">$</span> python3 src/frontend/frontend.py tests/programs/float.py &gt; /tmp/float.ir
+<span class="accent">$</span> ./build/tier_runner /tmp/float.ir --strict
+<span class="muted">[tier1] native</span>
+0.3333333333333333</pre>
               </div>
+              <p>
+                <code>[tier1] native</code> goes to stderr; the program's own output goes to stdout.
+                <code>--strict</code> means “native only, refuse rather than fall back”, so a clean exit status is proof the
+                code was really emitted and executed. Use it when testing: <code>--auto</code> can hide a total fallback
+                behind correct output.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>build system</dt><dd><code>cmake</code>, &ge; 3.20</dd></div>
+                <div class="spec-line"><dt>compiler</dt><dd><code>C++20</code> · tested GCC 12, Clang 17</dd></div>
+                <div class="spec-line"><dt>Python</dt><dd><code>&ge; 3.10</code>, compile step only</dd></div>
+                <div class="spec-line"><dt>third-party dependencies</dt><dd class="no">none</dd></div>
+              </dl>
+              <p>
+                The optional <code>lithon</code> wrapper does the two-step dance for you:
+                <code>pip install -e .</code>, then <code>lithon tests/programs/float.py --strict</code>. Add
+                <code>--ir</code> to print the IR and stop, or <code>-v</code> to see which tier ran and why.
+              </p>
             </div>
 
             <div class="doc-block reveal" id="mental-model">
               <h3><span>01</span>The mental model</h3>
               <p>
-                Lithon behaves like a two-lane road. Proven, static operations take the Tier-1 native path. Dynamic or
-                unhandled operations fall back to a Tier-0 C++ interpreter instead of pretending uncertainty is free.
+                Lithon is a two-lane road. A block whose types are provably static takes the Tier-1 native path and is
+                compiled straight to x86-64. Anything the verifier cannot establish falls to a Tier-0 C++ interpreter,
+                which is a real fallback rather than a guess — and <code>--strict</code> turns that fallback into a refusal.
               </p>
               <div class="info-grid">
                 <article class="info-tile">
-                  <strong>Read like Python</strong>
-                  <p>Familiar syntax and explicit annotations keep the surface expressive.</p>
-                </article>
-                <article class="info-tile">
                   <strong>Prove before run</strong>
-                  <p>The verifier rejects type flow it cannot mathematically establish.</p>
+                  <p>Types are settled before execution begins. A flow that cannot be established is never emitted.</p>
                 </article>
                 <article class="info-tile">
                   <strong>Emit native</strong>
-                  <p>Typed AST blocks become guard-free x86-64 instructions.</p>
+                  <p>Typed AST blocks become guard-free x86-64 in executable memory. No guards on the hot path.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Fall back honestly</strong>
+                  <p>Tier-0 runs the same program. <code>--strict</code> refuses rather than quietly taking the slow lane.</p>
                 </article>
               </div>
             </div>
@@ -187,23 +209,155 @@
             <div class="doc-block reveal" id="types">
               <h3><span>02</span>Types &amp; flow</h3>
               <p>
-                Every variable needs a fixed type before execution begins. That constraint is not ceremony—it is the
-                contract that lets Lithon avoid boxing, dynamic dispatch, and hot-path checks.
+                Every binding carries an explicit annotation, and numeric types carry an explicit width. This is not
+                ceremony — it is the contract that lets Lithon skip boxing, dynamic dispatch, and hot-path checks. A bare
+                <code>int</code> is not a type in Lithon: the checker rejects it by name.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>signed integers</dt><dd><code>int[8] int[16] int[32] int[64]</code></dd></div>
+                <div class="spec-line"><dt>floating point</dt><dd><code>float[32] float[64]</code></dd></div>
+                <div class="spec-line"><dt>boolean</dt><dd><code>bool</code> · takes no width</dd></div>
+                <div class="spec-line"><dt>unannotated binding</dt><dd class="no">rejected</dd></div>
+                <div class="spec-line"><dt>widening a value</dt><dd>automatic</dd></div>
+                <div class="spec-line"><dt>narrowing a value</dt><dd class="no">never allowed</dd></div>
+                <div class="spec-line"><dt>int &rarr; float</dt><dd>automatic</dd></div>
+                <div class="spec-line"><dt>float &rarr; int</dt><dd class="no">does not exist · no cast syntax</dd></div>
+                <div class="spec-line"><dt>bare integer literal</dt><dd>is <code>int[64]</code></dd></div>
+                <div class="spec-line"><dt><code>range(N)</code> vs loop width</dt><dd>checked at compile time</dd></div>
+              </dl>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>widening · accepted</span></div>
+                <pre>n: <span class="accent">int[8]</span> = 100
+wide: <span class="accent">int[64]</span> = n
+ratio: <span class="accent">float[64]</span> = n</pre>
+              </div>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>narrowing · rejected</span></div>
+                <pre>narrow: <span class="bad">int[8]</span> = wide
+<span class="bad">error: cannot narrow int[64] into int[8]</span></pre>
+              </div>
+              <p>
+                Because a bare literal is <code>int[64]</code>, passing one straight into a narrower parameter is always a
+                narrowing error. The value has to come from an already-narrower-typed variable instead. Function contracts
+                are checked the same way: parameters and the return type are mandatory, call sites are checked against the
+                signature, and a declared return type must be provably wide enough for what is actually returned — the
+                compiler never auto-widens it for you.
               </p>
               <div class="code-card">
-                <div class="code-card-bar"><i></i><span>examples/fib.py</span></div>
-                <pre><span class="accent">def</span> fib(n: <span class="accent">int</span>) -&gt; <span class="accent">int</span>:
-    <span class="accent">if</span> n &lt; 2:
-        <span class="accent">return</span> n
-    <span class="accent">return</span> fib(n - 1) + fib(n - 2)</pre>
+                <div class="code-card-bar"><i></i><span>tests/typed_regression/function.py</span></div>
+                <pre><span class="accent">def</span> add(a: <span class="accent">int[64]</span>, b: <span class="accent">int[64]</span>) -&gt; <span class="accent">int[64]</span>:
+    <span class="accent">return</span> a + b
+
+x: <span class="accent">int[64]</span> = add(3, 4)
+<span class="accent">print</span>(x)</pre>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="language">
+              <h3><span>03</span>The language subset</h3>
+              <p>
+                The engine is fast and well tested on the subset it supports. That subset is small on purpose, and the
+                boundaries are worth knowing before you write anything against it.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>assignment</dt><dd>typed and untyped</dd></div>
+                <div class="spec-line"><dt>augmented assignment</dt><dd><code>+= -= *= /=</code></dd></div>
+                <div class="spec-line"><dt>literals</dt><dd>int · float · bool</dd></div>
+                <div class="spec-line"><dt>arithmetic</dt><dd><code>+ - * /</code></dd></div>
+                <div class="spec-line"><dt>comparisons</dt><dd>single, non-chained</dd></div>
+                <div class="spec-line"><dt>boolean operators</dt><dd><code>and</code> <code>or</code> <code>not</code> · two operands</dd></div>
+                <div class="spec-line"><dt>control flow</dt><dd><code>if</code> · <code>elif</code> · <code>else</code> · <code>while</code></dd></div>
+                <div class="spec-line"><dt>loops</dt><dd><code>for x in range(N)</code> · one argument</dd></div>
+                <div class="spec-line"><dt>functions</dt><dd>recursion, self tail calls</dd></div>
+                <div class="spec-line"><dt>chained comparison</dt><dd class="no">not supported</dd></div>
+                <div class="spec-line"><dt><code>for</code>&thinsp;/&thinsp;<code>else</code></dt><dd class="no">rejected, never silently dropped</dd></div>
+              </dl>
+              <p>
+                A loop variable must be declared before the loop, because the verifier checks what
+                <code>range(N)</code> produces against the width already on that name:
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>tests/typed_regression/nested_loop.py</span></div>
+                <pre>total: <span class="accent">int[64]</span> = 0
+i: <span class="accent">int[64]</span> = 0
+j: <span class="accent">int[64]</span> = 0
+<span class="accent">for</span> i <span class="accent">in</span> range(5):
+    <span class="accent">for</span> j <span class="accent">in</span> range(5):
+        total = total + i * j
+<span class="accent">print</span>(total)</pre>
               </div>
             </div>
 
             <div class="doc-block reveal" id="runtime">
-              <h3><span>03</span>Runtime notes</h3>
+              <h3><span>04</span>Runtime notes</h3>
               <p>
-                The native backend allocates executable memory through the operating system and writes machine code
-                directly. The engine is designed to stay small: no LLVM, no Cranelift, no external runtime stack.
+                The backend is a hand-rolled x86-64 encoder written in C++20. Emitted machine code is written straight into
+                memory the OS marked executable, and called through a function pointer — <code>mmap</code> with
+                <code>PROT_READ | PROT_EXEC</code> on Linux, <code>VirtualAlloc</code> on Windows. There is no LLVM, no
+                Cranelift, and no external runtime stack in the picture.
+              </p>
+              <div class="info-grid">
+                <article class="info-tile">
+                  <strong>IR text format</strong>
+                  <p>Parsed inside the engine, so the native tier has no Python dependency of any kind.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Calling conventions</strong>
+                  <p>SysV and Win64 ABI alignment is implemented and audited for the host convention.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Float is real</strong>
+                  <p>SSE2 end to end. One formatter serves both tiers, so their output agrees byte for byte.</p>
+                </article>
+              </div>
+              <p>
+                Floats are the part of the engine that took the most care, because both tiers have to agree exactly.
+                Division by zero traps like Python's <code>ZeroDivisionError</code> rather than producing IEEE
+                <code>inf</code>/<code>nan</code>, and a NaN divisor must <em>not</em> trap — Python propagates it, and
+                <code>-0.0</code> must, because it compares equal to <code>0.0</code>. A float live across a call spills,
+                since every XMM register is caller-saved on both ABIs.
+              </p>
+              <p>
+                Register allocation and liveness are shipped and tested. So is a set of optimizations that can each be
+                switched off individually, so their effect can be measured rather than assumed: strength reduction,
+                callee-saved borrowing, constant folding, dead code elimination, and loop rotation.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="limits">
+              <h3><span>05</span>Honest limits</h3>
+              <p>
+                A green test run covers the subset above and should not be mistaken for a finished language. These are the
+                gaps as they stand today.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>IR opcodes emitted</dt><dd><code>19 of 20</code></dd></div>
+                <div class="spec-line"><dt><code>Phi</code></dt><dd class="no">no emitter yet</dd></div>
+                <div class="spec-line"><dt>arguments per function / call</dt><dd class="no">capped at 2</dd></div>
+                <div class="spec-line"><dt>AOT binary emit</dt><dd class="no">none · everything runs in-process</dd></div>
+                <div class="spec-line"><dt>architectures</dt><dd class="no">x86-64 only</dd></div>
+                <div class="spec-line"><dt>diamond unrolling</dt><dd>opt-in via <code>--unroll-diamonds</code></dd></div>
+              </dl>
+              <p>
+                <code>Phi</code> is the single unemitted opcode, and it is what blocks <code>if</code>-as-expression
+                lowering once both arms have to merge without a stack round-trip. Lifting the two-argument cap is the other
+                blocker: most of the remaining test programs are waiting on it. Diamond unrolling is implemented,
+                correct, and fuzzed — but it measured slower on a branchy loop, so it stays behind a flag rather than
+                being deleted.
+              </p>
+              <p>Everything below is how those claims get checked rather than taken on trust:</p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>verification</span></div>
+                <pre><span class="accent">$</span> ctest --test-dir build --output-on-failure
+<span class="accent">$</span> bash tools/verify_all.sh
+<span class="accent">$</span> python3 tools/run_typed_regression.py     <span class="muted"># 12/12</span>
+<span class="accent">$</span> python3 tools/run_tier_diff.py            <span class="muted"># 33/33</span>
+<span class="accent">$</span> python3 tools/fuzz_diff.py --count 300 --floats</pre>
+              </div>
+              <p>
+                <code>run_tier_diff.py</code> is the highest-value of those: it runs every program through both tiers and
+                requires byte-identical stdout, then reports which tier actually ran — so a pass cannot hide “everything
+                silently fell back to the interpreter”.
               </p>
             </div>
           </div>
