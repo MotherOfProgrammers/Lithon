@@ -6,11 +6,11 @@
 
 ### Give Python wings. Bare-metal speed with zero external dependencies.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=github-actions)](https://github.com/your-username/lithon)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=github-actions)](https://github.com/Project-Lithon/lithon/actions)
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=c%2B%2B)](https://en.cppreference.com/w/cpp/20)
 [![Architecture](https://img.shields.io/badge/arch-x86--64-red?style=flat-square)](https://en.wikipedia.org/wiki/X86-64)
-[![Dependencies](https://img.shields.io/badge/dependencies-zero-success?style=flat-square)](#)
-[![Typing](https://img.shields.io/badge/typing-mandatory%20static-green?style=flat-square)](#)
+[![Dependencies](https://img.shields.io/badge/third--party_deps-zero-success?style=flat-square)](#-quickstart)
+[![Typing](https://img.shields.io/badge/typing-mandatory%20static-green?style=flat-square)](#-what-is-lithon)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 </div>
@@ -35,31 +35,74 @@ Rather than linking heavy compiler frameworks like LLVM or Cranelift, Lithon’s
 
 ---
 
-## ⚡ Quickstart (Under 10 Seconds)
+## ⚡ Quickstart
 
-Lithon requires **zero external dependencies**. No GCC, no LLVM, no Python installation needed to run compiled scripts.
+Lithon has **no third-party dependencies** — no LLVM, no runtime library, nothing
+to `pip install` to make the engine work. It does need a toolchain and a
+language, though, so the "zero dependencies" claim is about the *engine's*
+inputs, not its build:
+
+- CMake ≥ 3.20 and a **C++20** compiler (tested with GCC 12 and Clang 17)
+- Python ≥ 3.10 — only for the compile step, which turns `.py` into IR. Once IR
+  exists, the native program never touches CPython: no objects, no refcounting,
+  no GC.
 
 ```bash
-# 1. Clone the repository
-git clone [https://github.com/your-username/lithon.git](https://github.com/your-username/lithon.git)
+# 1. Clone
+git clone git@github.com:Project-Lithon/lithon.git
 cd lithon
 
-# 2. Build the zero-dependency C++ engine
-make -j$(nproc)
+# 2. Build the C++ engine. There is no Makefile; CMake drives everything.
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 
-# 3. Run a benchmark script with native x64 JIT compilation
-./lithon run examples/fib.py --dump-hex
+# 3. Compile a .py program to IR, then run it on the native tier.
+#    The frontend is the only step that involves Python.
+python3 src/frontend/frontend.py tests/programs/float.py > /tmp/float.ir
+./build/tier_runner /tmp/float.ir --strict
 ```
 
-### Terminal Output Preview
 ```text
-[+] Lithon v1.0.0-beta [x86-64 Native JIT]
-[+] Static Flow Verifier: Passed (0 errors).
-[+] Emitted 206 bytes x64 machine code @ 0x7f9a12b00000 (PROT_READ|PROT_EXEC)
-[+] Payload: 55 48 89 e5 48 81 ec 20 00 00 00 48 89 7d f8 ...
-[+] Result: fib(30) = 832040
-[+] Execution Time: 6.90 ms (210.7x faster than CPython 3.12)
+[tier1] native
+0.3333333333333333
+0.30000000000000004
+1.0
+-0.0
+1.0000000000000002
+...
 ```
+
+The `[tier1] native` line goes to **stderr**; the program's own output goes to
+stdout. `--strict` means "native only, refuse rather than fall back", so a
+successful exit status is proof the code was really emitted and executed —
+that is the flag to use when testing, because `--auto` can hide a total
+fallback to the interpreter behind correct output.
+
+### The `lithon` command
+
+`pip install -e .` adds a `lithon` wrapper that does the two-step dance for you.
+It is optional — the engine works without it — and it installs into whichever
+interpreter you point `pip` at, so check `lithon --version` agrees with the
+`python3` you expect.
+
+```bash
+pip install -e .
+lithon tests/programs/float.py            # auto: native when provably safe
+lithon tests/programs/float.py --strict   # native only, rc=3 if refused
+lithon tests/programs/float.py --ir       # print the IR and stop
+lithon tests/programs/float.py -v         # show which tier ran, and why
+```
+
+`init.py` finds the frontend and `build/tier_runner` relative to the repo, and
+honours `LITHON_HOME` and `LITHON_RUNNER` if you need to point it elsewhere.
+
+> **Two layouts, one of them dead.** The tree carries a package layout
+> (`__init__.py`, `__main__.py`, where `_ROOT` is the repo's *parent*) alongside
+> the flat layout actually installed (`init.py`, `main.py`, where `_ROOT` is the
+> repo root). `pyproject.toml` wires the flat one, so the package pair is dead
+> code and `import lithon` raises `ModuleNotFoundError`. The `lithon` *command*
+> works; the `lithon` *module* does not yet. Worth collapsing to a real
+> `lithon/` package.
 
 ---
 
@@ -262,13 +305,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-### Layer 1 — unit tests (~1 s)
+If you are on a machine with a small `/tmp` (a 100 MB tmpfs is enough to fail
+this), point the compiler's scratch space somewhere roomier:
 
 ```bash
-ctest --test-dir build --output-on-failure        # 15/15
+TMPDIR=/path/to/scratch cmake --build build -j$(nproc)
 ```
 
-The 15 tests are not all the same kind, and it is worth knowing which is which:
+### Layer 1 — unit tests (~0.1 s)
+
+```bash
+ctest --test-dir build --output-on-failure        # 17/17
+```
+
+The tests are not all the same kind, and it is worth knowing which is which:
 
 - **`liveness_test`, `regalloc_test`** — pure analysis tests. They build IR and
   call the pass directly, and never emit a byte. A green run here means the
@@ -279,6 +329,14 @@ The 15 tests are not all the same kind, and it is worth knowing which is which:
   encoding.
 - **`encoder_test`, `stack_test`, `branch_test`, `print_guard_*`** — the
   x86/ABI layer underneath, tested in isolation.
+- **`float_format_test`** — pure computation, no JIT, no interpreter. Pins
+  `host_format_double` against CPython's `repr` with expectations *transcribed
+  by hand* rather than generated from the code under test, since generating
+  them would only prove the formatter agrees with itself.
+- **`compile_module_float_test`** — needs real machine code, so it is
+  POSIX-only and uses `fork`: a float live across a call, a NaN divisor that
+  must propagate, and `0.0` / `-0.0` divisors that must trap. The last two run
+  in a child process because the trap handler calls `exit(1)`.
 
 ### Layer 2 — the full gate (~2 min)
 
@@ -383,11 +441,26 @@ python3 tools/native_bench.py --runs 30 --compare /tmp/before.json
 
 ### What a green run does not prove
 
-The test suite covers the subset of the language the engine supports today. It
-does not mean floats, `Div`, `Phi`, or more than two arguments work — those are
-listed as gaps [above](#known-gaps--the-honest-list) precisely so a green run is
-not mistaken for a complete one. If you add support for one of them, the
-honest next step is to move it out of that list.
+The test suite covers the subset of the language the engine supports today.
+Floats and `Div` now work, so they have moved out of the gaps list; what remains
+unimplemented is `Phi` and support for more than two arguments, and those are
+listed [above](#known-gaps--the-honest-list) precisely so a green run is not
+mistaken for a complete one. If you add support for one of them, the honest
+next step is to move it out of that list.
+
+Two more limits worth stating plainly, because a passing run can obscure both:
+
+- **Opcode coverage is not operand coverage.** 19 of 20 opcodes are emitted and
+  each is exercised through `tier_runner --strict`, so a pass proves the opcode
+  was genuinely executed natively rather than fallen back. It does *not* prove
+  every operand shape is right — that is what `encoder_test`'s byte-exact
+  assertions and the fuzz modes are for. `gt` and `not`, for instance, have a
+  single native use each in the checked-in `.ir` corpus.
+- **The interpreter is an oracle, not a specification.** Where Lithon and
+  CPython disagree, `run_tier_diff.py` reports it separately as a language gap
+  rather than a JIT bug — loop variables are one known case, deliberate. That
+  is correct for *this* project, but it does mean the suite cannot catch a bug
+  where both engines share the same wrong idea.
 
 ---
 
