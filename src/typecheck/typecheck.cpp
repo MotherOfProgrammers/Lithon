@@ -1,4 +1,5 @@
 #include "typecheck.h"
+#include "../jit/float_runtime.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <cstdint>
@@ -291,6 +292,29 @@ private:
                           type_str(target) + " (valid range " + std::to_string(lo) + ".." +
                           std::to_string(hi) + ") -- V1_SPEC 0.6.5");
                 }
+                return;
+            }
+            // An int literal is not a float, and a float-typed location has to
+            // hold a float. This used to fall out of the int branch above and
+            // return, so `j: float[64] = 0` was accepted here and only blew up
+            // much later in codegen, where the variable had been written once
+            // as an int (here) and once as a float (the loop), joined to
+            // Unknown, and the print guard refused with a message about a
+            // "value stored both an int and a float" that never mentioned the
+            // literal the user actually wrote.
+            //
+            // Expression-level promotion is a different rule and is untouched:
+            // Op::Add/Sub/Mul/Mod infer their result type directly (see
+            // check_instr) and never come through here, so `7 + 0.5` is
+            // still 7.5. What this forbids is storing an int into a
+            // float-typed variable, which is the declaration being a
+            // contract about what the variable holds.
+            if (target.kind == "float" && c->op == Op::ConstInt) {
+                error(context + ": literal " + std::to_string(c->int_imm) + " is an int, but " +
+                      type_str(target) + " must hold a float -- write " +
+                      lithon::jit::host_format_double(static_cast<double>(c->int_imm)) +
+                      " (V1_SPEC 0.6.11)");
+                return;
             }
             return;
         }

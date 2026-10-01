@@ -20,7 +20,11 @@ Static analysis over Python's ast -- no execution. Enforces:
             branches (function scoping, not block scoping)
   0.6.11 -- conversions: widening/same-width automatic, narrowing
             never allowed; int -> float automatic, float -> int
-            never allowed; no cast syntax exists anywhere
+            never allowed; no cast syntax exists anywhere. The int ->
+            float conversion does NOT apply to a literal: an int literal
+            is not a float, so `j: float[64] = 0` is a type error and
+            `j: float[64] = 0.0` is the correct spelling. A float-
+            typed variable holds a float.
   0.6.12 -- range()'s produced values are checked against the loop
             variable's declared width at compile time when known
 
@@ -119,6 +123,27 @@ def check_assignment_compatible(source: LType, target: LType, context: str):
             f"(V1_SPEC 0.6.11) -- no cast can perform this")
 
     raise RCRError(f"{context}: cannot convert {source} to {target} -- no such conversion exists")
+
+
+def check_literal_kind(value_node, declared: LType, context: str):
+    """An int literal is not a float, and a float-typed location must hold a
+    float. `j: float[64] = 0` is a type error; the correct spelling is `0.0`.
+
+    This is deliberately NOT the same as the general int -> float conversion
+    below, which stays automatic for values whose provenance is not a literal
+    (a variable, a call result, `f(5)` where f takes a float, `return 0` from a
+    -> float[64] function). What is forbidden is storing a literal int into a
+    float-typed location, because the annotation is a contract about what the
+    variable holds and the user plainly meant a float.
+
+    Expression-level promotion is a different rule again and is unaffected:
+    `7 + 0.5` is 7.5, inferred by infer_binop_type without coming through here.
+    """
+    if declared.kind == "float" and literal_kind(value_node) == "int":
+        as_float = repr(float(value_node.value))
+        raise RCRError(
+            f"{context}: literal {value_node.value} is an int, but {declared} "
+            f"must hold a float -- write {as_float} (V1_SPEC 0.6.11)")
 
 
 def check_literal_overflow(value_node, declared: LType, context: str):
@@ -270,6 +295,7 @@ class TypeChecker:
 
     def check_assign_value(self, value_node, declared, scope, context):
         if literal_kind(value_node) is not None:
+            check_literal_kind(value_node, declared, context)
             check_literal_overflow(value_node, declared, context)
         else:
             source_type = self.infer_expr_type(value_node, scope, context)
