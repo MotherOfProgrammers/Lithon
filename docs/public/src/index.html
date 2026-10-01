@@ -149,7 +149,7 @@
             <span class="trust-line"></span>
             <span>Designed in Sri Lanka</span>
             <span class="trust-line trust-line--short"></span>
-            <span>Apache 2.0</span>
+            <span>MIT</span>
           </div>
         </div>
 
@@ -167,7 +167,7 @@
             <div class="code-content">
               <div class="code-line">
                 <span class="line-number">01</span>
-                <span><b class="code-keyword">def</b> <b class="code-function">fib</b>(n: <b class="code-type">int</b>) -&gt; <b class="code-type">int</b>:</span>
+                <span><b class="code-keyword">def</b> <b class="code-function">fib</b>(n: <b class="code-type">int[32]</b>) -&gt; <b class="code-type">int[32]</b>:</span>
               </div>
               <div class="code-line">
                 <span class="line-number">02</span>
@@ -190,7 +190,7 @@
             </div>
             <div class="code-result">
               <div><span class="result-prompt">lithon</span><span class="result-caret">›</span> <span>static flow verified</span></div>
-              <div><span class="result-prompt">lithon</span><span class="result-caret">›</span> <strong>832040</strong> <small>· 9.45 ms</small></div>
+              <div><span class="result-prompt">lithon</span><span class="result-caret">›</span> <strong>832040</strong> <small>· 7.01 ms · tier-1 native</small></div>
             </div>
           </div>
           <div class="floating-badge floating-badge--top">
@@ -238,11 +238,11 @@
           <article class="feature-card feature-card--large reveal">
             <div class="feature-topline"><span class="feature-index">01</span><span class="feature-tag">Verification</span></div>
             <div class="feature-graphic type-graphic" aria-hidden="true">
-              <div class="type-node type-node--source">source</div>
+              <div class="type-node type-node--source">n: int</div>
               <div class="type-connector"></div>
-              <div class="type-node type-node--verified"><span>✓</span> typed</div>
+              <div class="type-node type-node--verified"><span>✓</span> n: int[32]</div>
               <div class="type-connector type-connector--short"></div>
-              <div class="type-chip">safe to run</div>
+              <div class="type-chip">no guards</div>
             </div>
             <h3>Every variable<br />has a proof.</h3>
             <p>Static flow verification catches uncertainty before it reaches the machine. No hidden dynamic dispatch. No surprises at runtime.</p>
@@ -254,7 +254,7 @@
               <span class="speed-line speed-line--one"></span>
               <span class="speed-line speed-line--two"></span>
               <span class="speed-line speed-line--three"></span>
-              <span class="speed-core">9.45<small>ms</small></span>
+              <span class="speed-core">7.01<small>ms</small></span>
             </div>
             <h3>Skip the warm-up.</h3>
             <p>Native x86-64 instructions are emitted directly into executable memory. Fast from the first call.</p>
@@ -330,61 +330,122 @@
             <div class="terminal-body">
               <div><span class="terminal-prompt">$</span> git clone https://github.com/MotherOfProgrammers/Lithon.git</div>
               <div><span class="terminal-prompt">$</span> cd Lithon</div>
-              <div><span class="terminal-prompt">$</span> make -j$(nproc)</div>
-              <div class="terminal-output"><span class="output-check">✓</span> Lithon v1.0.0-beta <span>· x86-64 Native JIT</span></div>
-              <div class="terminal-output"><span class="output-check">✓</span> Static Flow Verifier: Passed <span>· 0 errors</span></div>
-              <div><span class="terminal-prompt">$</span> ./lithon run examples/fib.py</div>
-              <div class="terminal-result">Result: fib(30) = <strong>832040</strong></div>
+              <div><span class="terminal-prompt">$</span> cmake -B build -DCMAKE_BUILD_TYPE=Release</div>
+              <div><span class="terminal-prompt">$</span> cmake --build build -j$(nproc)</div>
+              <div><span class="terminal-prompt">$</span> python3 src/frontend/frontend.py tests/programs/float.py &gt; /tmp/float.ir</div>
+              <div><span class="terminal-prompt">$</span> ./build/tier_runner /tmp/float.ir --strict</div>
+              <div class="terminal-output"><span class="output-check">✓</span> [tier1] native <span>· no interpreter fallback</span></div>
+              <div class="terminal-result">0.3333333333333333</div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="team-section container" id="team">
-        <div class="team-header reveal">
+      <section class="themes-section container" id="themes">
+        <div class="themes-header reveal">
           <div>
-            <p class="section-kicker">04 / The people</p>
-            <h2>Made by people<br /><span>who care about speed.</span></h2>
+            <p class="section-kicker">04 / The themes</p>
+            <h2>Four convictions<br /><span>behind the engine.</span></h2>
           </div>
-          <p>Independent minds, one shared belief: the tools underneath our ideas should be as thoughtful as the ideas themselves.</p>
+          <p>
+            Lithon is not a bag of features. It is four convictions about what a language owes the person writing the code —
+            and every layer of the engine exists to serve one of them.
+          </p>
         </div>
-        <div class="team-grid">
-          <article class="person-card person-card--featured reveal">
-            <div class="person-top"><span class="person-role">Pioneer · Lead developer</span><span class="person-number">01</span></div>
-            <div class="avatar avatar--tharusha" aria-hidden="true"><span>WR</span><i></i></div>
-            <h3>W.H. Tharusha<br />Rasanjana</h3>
-            <p>Building the core idea from first principles: a Python-flavored language with a direct line to native execution.</p>
-            <div class="social-links">
-              <a href="https://github.com/MotherOfProgrammers" target="_blank" rel="noreferrer" aria-label="Tharusha on GitHub">GH</a>
-              <a href="https://www.linkedin.com/in/tharusha-rasanjana-b7420a281" target="_blank" rel="noreferrer" aria-label="Tharusha on LinkedIn">in</a>
-              <a href="https://www.instagram.com/tharusha_x.r/" target="_blank" rel="noreferrer" aria-label="Search for Tharusha on Instagram">ig</a>
-              <a href="https://www.youtube.com/results?search_query=RIPS+WORLD" target="_blank" rel="noreferrer" aria-label="Search for Tharusha on YouTube">yt</a>
+        <div class="themes-grid">
+          <article class="theme-card theme-card--feature reveal">
+            <div class="theme-topline"><span class="theme-index">01</span><span class="theme-tag">Ownership</span></div>
+            <h3>Nothing<br />to inherit.</h3>
+            <div class="theme-manifest">
+              <div class="theme-line"><span>llvm</span><b class="theme-no">✗</b></div>
+              <div class="theme-line"><span>cranelift</span><b class="theme-no">✗</b></div>
+              <div class="theme-line"><span>runtime libraries</span><b class="theme-no">✗</b></div>
+              <div class="theme-line"><span>first principles</span><b class="theme-yes">✓</b></div>
             </div>
+            <p>
+              No compiler toolkit underneath, no package graph behind the language. Every layer is small enough to read in one
+              sitting, which is the only way an engine can stay fast and stay understood at the same time.
+            </p>
           </article>
-          <article class="person-card reveal reveal--delay">
-            <div class="person-top"><span class="person-role">Core developer</span><span class="person-number">02</span></div>
-            <div class="avatar avatar--tenuka" aria-hidden="true"><span>TO</span><i></i></div>
-            <h3>Tenuka<br />Omaljith</h3>
-            <p>Helping shape the sharp the FrontEnd of Lithon, making it intuitive and powerful.</p>
-            <div class="social-links">
-              <a href="https://github.com/Tenuka22" target="_blank" rel="noreferrer" aria-label="Tenuka on GitHub">GH</a>
-              <a href="https://www.linkedin.com/search/results/people/?keywords=Tenuka%20Omaljith" target="_blank" rel="noreferrer" aria-label="Search for Tenuka on LinkedIn">in</a>
-              <a href="https://www.instagram.com/tenuka22" target="_blank" rel="noreferrer" aria-label="Tenuka on Instagram">ig</a>
-              <a href="https://www.youtube.com/results?search_query=Tenuka+Omaljith" target="_blank" rel="noreferrer" aria-label="Search for Tenuka on YouTube">yt</a>
+          <article class="theme-card reveal reveal--delay">
+            <div class="theme-topline"><span class="theme-index">02</span><span class="theme-tag">Proof</span></div>
+            <h3>Nothing<br />left to chance.</h3>
+            <div class="theme-manifest">
+              <div class="theme-line"><span>flow analysis</span><b>static</b></div>
+              <div class="theme-line"><span>guards emitted</span><b>0</b></div>
+              <div class="theme-line"><span>runtime dispatch</span><b>none</b></div>
             </div>
+            <p>
+              Types are settled before the code runs. Once a program is verified, the hot path carries no guards and no dynamic
+              lookups — the machine executes exactly what the verifier promised it would.
+            </p>
           </article>
-          <article class="person-card reveal reveal--delay-more">
-            <div class="person-top"><span class="person-role">Core developer</span><span class="person-number">03</span></div>
-            <div class="avatar avatar--nadila" aria-hidden="true"><span>NY</span><i></i></div>
-            <h3>Nadila<br />Yendinu</h3>
-            <p>Bringing a careful eye to the details that make a powerful framework feel clear, approachable, and open.</p>
-            <div class="social-links">
-              <a href="https://github.com/nadilayendinu" target="_blank" rel="noreferrer" aria-label="Nadila on GitHub">GH</a>
-              <a href="https://www.linkedin.com/search/results/people/?keywords=Nadila%20Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on LinkedIn">in</a>
-              <a href="https://www.instagram.com/explore/search/keyword/?q=Nadila%20Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on Instagram">ig</a>
-              <a href="https://www.youtube.com/results?search_query=Nadila+Yendinu" target="_blank" rel="noreferrer" aria-label="Search for Nadila on YouTube">yt</a>
+          <article class="theme-card reveal reveal--delay">
+            <div class="theme-topline"><span class="theme-index">03</span><span class="theme-tag">Proximity</span></div>
+            <h3>Closer than<br />a code review.</h3>
+            <div class="theme-manifest">
+              <div class="theme-line"><span>frontend</span><b>Python</b></div>
+              <div class="theme-line"><span>engine</span><b>C++20</b></div>
+              <div class="theme-line"><span>output</span><b>x86-64</b></div>
             </div>
+            <p>
+              The distance between an idea and the instruction that runs it is three deliberate layers. No abstraction tax, and no
+              intermediate representation that nobody owns.
+            </p>
           </article>
+          <article class="theme-card theme-card--feature reveal reveal--delay-more">
+            <div class="theme-topline"><span class="theme-index">04</span><span class="theme-tag">Openness</span></div>
+            <h3>Open<br />by default.</h3>
+            <div class="theme-manifest">
+              <div class="theme-line"><span>license</span><b>MIT</b></div>
+              <div class="theme-line"><span>issues</span><b>welcome</b></div>
+              <div class="theme-line"><span>roadmap</span><b>public</b></div>
+            </div>
+            <p>
+              The engine, the verifier, and the roadmap sit in public from the first commit. Read it, disagree with it, and open
+              the pull request — the roadmap here is a conversation, not a surprise.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="contributors-section" id="contributors">
+        <div class="container">
+          <div class="contributors-header reveal">
+            <div>
+              <p class="section-kicker">05 / Contributors</p>
+              <h2>Everyone who<br /><span>left a mark.</span></h2>
+            </div>
+            <p>
+              Lithon is built in the open, so the credits are read straight from the commit history. Everyone below has pushed to
+              the repository — fetched live from GitHub rather than hand-written into this page.
+            </p>
+          </div>
+
+          <div class="contributors-panel reveal reveal--delay">
+            <div class="contributors-bar">
+              <span class="contributors-repo">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+                  />
+                </svg>
+                MotherOfProgrammers / Lithon
+              </span>
+              <span class="contributors-count" data-contributors-count hidden></span>
+              <a
+                class="contributors-link"
+                href="https://github.com/MotherOfProgrammers/Lithon/graphs/contributors"
+                target="_blank"
+                rel="noreferrer"
+                >Full contributor graph <span>↗</span></a
+              >
+            </div>
+            <ul class="contributors-list" data-contributors-list aria-busy="true"></ul>
+            <p class="contributors-status" data-contributors-status role="status">
+              The contributor list is read live from the repository on GitHub.
+            </p>
+          </div>
         </div>
       </section>
 

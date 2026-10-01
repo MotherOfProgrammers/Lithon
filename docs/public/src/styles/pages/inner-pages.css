@@ -42,11 +42,34 @@ main { padding-top: var(--header-height); }
 .doc-block h3 span { margin-right: 12px; color: var(--accent); font: var(--text-ui)/1 var(--mono); letter-spacing: 0.04em; }
 .doc-block p { max-width: 68ch; font-size: 15px; line-height: 1.75; color: var(--ink-muted); }
 
-.code-card { overflow: hidden; margin-top: 25px; border-radius: 5px; background: var(--code-bg); color: var(--code-fg); box-shadow: 9px 9px 0 var(--peach); }
+/* Inline code in prose picks up the mono face but nothing else: the snippets in
+   .code-card are already mono and must not be scaled by this. */
+.content-column code { font-family: var(--mono); font-size: 0.93em; }
+
+/* The peach shadow is a hard 9px offset rather than a blur, so it occupies
+   real layout-adjacent space: following content has to clear it or the shadow
+   strikes through the first line. Sibling margins collapse, so two stacked
+   cards still get one 34px gap rather than the sum. */
+.code-card { overflow: hidden; margin: 25px 0 34px; border-radius: 5px; background: var(--code-bg); color: var(--code-fg); box-shadow: 9px 9px 0 var(--peach); }
+/* Last in a block, the shadow would otherwise hang into the section break. */
+.doc-block > .code-card:last-child { margin-bottom: 25px; }
 .code-card-bar { min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 9px 15px; border-bottom: 1px solid var(--code-line); font: var(--text-ui)/1 var(--mono); opacity: 0.82; }
 .code-card-bar i { width: 6px; height: 6px; display: block; border-radius: 50%; background: var(--peach); }
 .code-card pre { margin: 0; padding: 22px 25px 26px; overflow: auto; font: 12px/1.9 var(--mono); }
 .code-card .accent { color: var(--peach); }
+/* In-page annotations for a snippet: which line the checker accepts, and which
+   one it refuses. Shares the failure tint already used by the REPL output. */
+.code-card .muted { color: color-mix(in srgb, var(--code-fg) 60%, transparent); }
+.code-card .bad { color: #ff9d8a; }
+
+/* The reference tables carry verdicts rather than prose, so they read as spec
+   sheets: the term on the left, what is legal on the right. */
+.spec-list { margin: 26px 0 0; border-top: 1px solid var(--border-strong); }
+.spec-line { display: flex; align-items: baseline; justify-content: space-between; gap: 22px; padding: 11px 2px; border-bottom: 1px solid var(--border); font: var(--text-ui-lg)/1.45 var(--mono); }
+.spec-line dt { color: var(--ink-muted); }
+.spec-line dd { margin: 0; text-align: right; }
+.spec-line code { font: inherit; color: var(--accent); }
+.spec-line .no { color: color-mix(in srgb, var(--ink-faint) 65%, transparent); }
 
 .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; margin-top: 26px; }
 .info-tile { min-height: 150px; padding: 21px; border: 1px solid var(--border); background: var(--surface); }

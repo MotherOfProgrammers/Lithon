@@ -38,8 +38,22 @@ const BUILTINS = new Set([
   "map", "max", "min", "print", "range", "round", "set", "sorted", "str", "sum", "tuple", "zip",
 ]);
 
-/** The four types the static flow verifier can prove. */
+/** The type names the tokeniser colours. Note that `bool` never takes a width:
+ *  the checker rejects `bool[N]`, so it is the one annotation written bare. */
 const TYPES = new Set(["int", "float", "bool", "str"]);
+
+/** What the autocomplete actually offers — the full annotations a binding can
+ *  legally carry. Offering a bare `int` would insert something the checker
+ *  refuses with "type 'int' requires an explicit size". */
+const TYPE_ANNOTATIONS: readonly Completion[] = [
+  { label: "int[8]", detail: "signed integer · -128..127", insert: "int[8]" },
+  { label: "int[16]", detail: "signed integer · -32768..32767", insert: "int[16]" },
+  { label: "int[32]", detail: "signed integer · 32-bit", insert: "int[32]" },
+  { label: "int[64]", detail: "signed integer · bare literals default here", insert: "int[64]" },
+  { label: "float[32]", detail: "single precision", insert: "float[32]" },
+  { label: "float[64]", detail: "double precision", insert: "float[64]" },
+  { label: "bool", detail: "no width parameter", insert: "bool" },
+];
 
 const OPERATOR_CHARS = "+-*/%<>=!&|^~";
 const PUNCTUATION_CHARS = "()[]{},:;.";
@@ -163,9 +177,7 @@ export function completionsFor(prefix: string, isMemberAccess: boolean): Complet
     detail: "builtin",
     insert: word,
   }));
-  const types: Completion[] = [...TYPES].map((word) => ({ label: word, detail: "type", insert: word }));
-
-  return [...matches(builtins), ...matches(types), ...matches(keywords)];
+  return [...matches(TYPE_ANNOTATIONS), ...matches(builtins), ...matches(keywords)];
 }
 
 const MEMBERS: readonly Completion[] = [

@@ -28,6 +28,12 @@
   --surface: color-mix(in srgb, var(--cream) 55%, transparent);
   --surface-solid: var(--cream);
   --header-height: 86px;
+  /* The bar floats over the page rather than sitting beside it, so it carries a
+     slightly deeper tone than --paper: at the same value it reads as an empty
+     strip with the content sliding underneath it. Light mode sinks toward the
+     ink hue; dark mode has no headroom left to sink into, so it goes toward
+     black instead. */
+  --bar-tone: color-mix(in srgb, var(--paper) 93%, var(--ink));
   /* Secondary text tints from the ink hue rather than sitting at a low
      opacity, so it holds 4.5:1 on every surface it lands on. */
   --ink-muted: #625f69;
@@ -63,8 +69,9 @@ html[data-theme="dark"] {
   --code-fg: #f8fff4;
   --code-line: rgba(248, 255, 244, 0.14);
   --code-string: #a8e6c0;
-  --surface: color-mix(in srgb, #ffffff 7%, transparent);
-  --surface-solid: color-mix(in srgb, #ffffff 12%, var(--paper));
+--surface: color-mix(in srgb, #ffffff 7%, transparent);
+    --surface-solid: color-mix(in srgb, #ffffff 12%, var(--paper));
+  --bar-tone: color-mix(in srgb, var(--paper) 90%, black);
   color-scheme: dark;
 }
 
@@ -87,6 +94,7 @@ html[data-theme="dark"] {
   --code-string: #a8e6c0;
     --surface: color-mix(in srgb, #ffffff 7%, transparent);
     --surface-solid: color-mix(in srgb, #ffffff 12%, var(--paper));
+  --bar-tone: color-mix(in srgb, var(--paper) 90%, black);
     color-scheme: dark;
   }
 }
@@ -260,22 +268,33 @@ html.js .reveal.is-visible > *:nth-child(6) { transition-delay: calc(var(--enter
   top: 0;
   left: 0;
   width: 100%;
-  background: color-mix(in srgb, var(--paper) 80%, transparent);
+  /* --bar-height is scoped to the header rather than :root so the page's own
+     offsets — scroll-padding, main's padding — stay put while the bar contracts.
+     Once the page has moved, the bar has done its job as a landmark and gives
+     the height back to the content. */
+  --bar-height: var(--header-height);
+  /* Kept slightly translucent so the page reads as passing underneath, with a
+     blur behind it — without the blur the text scrolling through shows through
+     the letters. */
+  background: color-mix(in srgb, var(--bar-tone) 90%, transparent);
+  -webkit-backdrop-filter: saturate(1.5) blur(12px);
+  backdrop-filter: saturate(1.5) blur(12px);
   border-bottom: 1px solid transparent;
-  transition: border-color 0.15s ease, background 0.15s ease, opacity 0.5s var(--ease), translate 0.5s var(--ease);
+  transition: border-color 0.15s ease, background 0.3s ease, opacity 0.5s var(--ease), translate 0.5s var(--ease);
 }
 
 html.js:not(.is-ready) .site-header { opacity: 0; translate: 0 -14px; }
 html.js.is-ready .site-header { opacity: 1; translate: 0 0; }
 
-.site-header.is-scrolled { border-color: var(--border); }
+.site-header.is-scrolled { --bar-height: calc(var(--header-height) - 22px); border-color: var(--border); }
 
 .nav {
-  height: var(--header-height);
+  height: var(--bar-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 25px;
+  transition: height 0.3s var(--ease);
 }
 
 .brand {
@@ -284,12 +303,15 @@ html.js.is-ready .site-header { opacity: 1; translate: 0 0; }
   gap: 11px;
   width: max-content;
 }
+.site-header .brand-name { font-size: 20px; transition: font-size 0.3s var(--ease); }
+.site-header.is-scrolled .brand-name { font-size: 17px; }
 html.js:not(.is-ready) .site-header .brand { opacity: 0; translate: 0 -8px; }
 html.js.is-ready .site-header .brand { animation: nav-drop 0.5s var(--ease) 0.05s backwards; }
 .brand-name { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
 .brand-dot { color: var(--accent); }
 
-.boa-mark { width: 31px; height: 31px; overflow: visible; transform: rotate(-12deg); }
+.boa-mark { width: 31px; height: 31px; overflow: visible; transform: rotate(-12deg); transition: width 0.3s var(--ease), height 0.3s var(--ease); }
+.site-header.is-scrolled .boa-mark { width: 26px; height: 26px; }
 .boa-mark__coil { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .boa-mark__head { fill: var(--peach); stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; }
 .boa-mark__eye { fill: var(--ink); }
@@ -465,7 +487,9 @@ html.js.is-ready .site-header .nav-actions > *:nth-child(4) { animation-delay: 0
   .container { width: min(100% - 36px, 560px); }
   .nav-links {
     position: absolute;
-    top: var(--header-height);
+    /* The header is the containing block and its height is the bar's, so 100%
+       tracks the bar as it contracts on scroll. */
+    top: 100%;
     left: 18px;
     right: 18px;
     padding: 8px;
@@ -518,5 +542,5 @@ html.js.is-ready .site-header .nav-actions > *:nth-child(4) { animation-delay: 0
   html.js .site-header .nav-links a,
   html.js .site-header .nav-actions > * { opacity: 1 !important; translate: none !important; animation: none !important; }
   .icon-button, .icon-button svg, .icon-button:hover, .icon-button:hover svg { translate: none; scale: none; box-shadow: none; transition: none; }
-  .hero-glow, .site-header, .button, .floating-badge, .feature-card, .person-card { filter: none !important; }
+  .hero-glow, .site-header, .button, .floating-badge, .feature-card, .theme-card, .contributor-link { filter: none !important; }
 }
