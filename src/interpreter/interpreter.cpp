@@ -2,7 +2,9 @@
 #include "runtime/value.h"
 #include "jit/float_runtime.h"
 
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <unordered_map>
 #include <stdexcept>
 
@@ -65,6 +67,24 @@ LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
             case Op::Add: return LithonValue::make_float(a + b);
             case Op::Sub: return LithonValue::make_float(a - b);
             case Op::Mul: return LithonValue::make_float(a * b);
+            case Op::Mod: {
+                // Same zero-divisor rule as Div above, for the same reason: the
+                // JIT checks it, so the two engines agree by construction. NaN
+                // divisors propagate rather than trap, again matching Div.
+                if (b == 0.0) throw std::runtime_error("interpreter: modulo by zero");
+                // fmod is exactly the truncated (sign-follows-dividend)
+                // remainder, so the float path needs no sign correction.
+                double r = std::fmod(a, b);
+                // A zero result is normalized to +0.0. fmod keeps the dividend's
+                // sign, so fmod(-0.0, 2.0) is -0.0, but the JIT's four-instruction
+                // a - trunc(a/b)*b sequence cannot: IEEE defines x - x as +0.0,
+                // so it necessarily loses the sign on an exact division. Rather
+                // than spend three more instructions (shift the sign bit out, shift
+                // it back, XOR) to reproduce a distinction print shows but
+                // arithmetic never observes, both engines return +0.0, which is
+                // also what Python does: -0.0 % 2.0 is 0.0.
+                return LithonValue::make_float(r == 0.0 ? 0.0 : r);
+            }
             default:
                 throw std::runtime_error("interpreter: not a binary arithmetic op");
         }
@@ -76,6 +96,19 @@ LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
         case Op::Add: return LithonValue::make_int(a + b);
         case Op::Sub: return LithonValue::make_int(a - b);
         case Op::Mul: return LithonValue::make_int(a * b);
+        case Op::Mod: {
+            if (b == 0) throw std::runtime_error("interpreter: modulo by zero");
+            // int64_t has no representable result for INT64_MIN % -1: it is 2^63,
+            // one past the maximum. C++ leaves that undefined and x86 `idiv`
+            // raises #DE, which would take the whole process down instead of
+            // producing a value. Wraparound arithmetic elsewhere in this
+            // interpreter is implemented as C++ overflow, so the defined
+            // answer here is the wrapped one: 0, which is also what the JIT
+            // emits. Both engines must agree, and 0 is the only choice that
+            // does not involve trapping.
+            if (a == std::numeric_limits<int64_t>::min() && b == -1) return LithonValue::make_int(0);
+            return LithonValue::make_int(a % b);
+        }
         default:
             throw std::runtime_error("interpreter: not a binary arithmetic op");
     }
@@ -197,6 +230,7 @@ LithonValue execute_function(const Module& module, const Function& fn,
                 case Op::Sub:
                 case Op::Mul:
                 case Op::Div:
+                case Op::Mod:
                     frame.regs[instr.result] = apply_binop(
                         instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
                     break;

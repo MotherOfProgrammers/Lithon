@@ -117,6 +117,65 @@ inline void emit_imul_reg_reg(CodeBuffer& buf, Reg dst, Reg src) {
     emit_u8(buf, modrm_reg_reg(dst, src));
 }
 
+// cqo -- sign-extend RAX into RDX:RAX. CWD/CDQ/CQO are the same opcode
+// 0x99, and REX.W is what selects the 64-bit form.
+// Encoding: REX.W + 99.
+inline void emit_cqo(CodeBuffer& buf) {
+    emit_u8(buf, rex(true, Reg::RAX, Reg::RAX));
+    emit_u8(buf, 0x99);
+}
+
+// idiv r/m64 -- signed divide RDX:RAX by the operand, leaving the quotient
+// in RAX and the remainder in RDX.
+// Encoding: REX.W + F7 /7. (The /1 and /5 forms are imul, /0 is test,
+// /4 is mul, so 7 is idiv.)
+//
+// Raises #DE on a zero divisor, and also on INT64_MIN / -1, which has no
+// representable quotient. The caller is responsible for both; this encoder
+// does not paper over them.
+inline void emit_idiv_reg(CodeBuffer& buf, Reg src) {
+    emit_u8(buf, rex(true, Reg::RDX, src));
+    emit_u8(buf, 0xF7);
+    emit_u8(buf, static_cast<uint8_t>(0xF8 | reg_low3(src)));
+}
+
+// sar dst, imm8  (64-bit arithmetic shift right by a count in 1..63)
+// Encoding: [REX.W] C1 /7 ib. Only a real shift count is encodable here;
+// x86 masks the count to 6 bits on execution, so a count of 0 is encoded as
+// 32, not 0. Left-shifting the count into the /7 slot is what puts imm8
+// where the CPU reads it.
+inline void emit_sar_reg_imm8(CodeBuffer& buf, Reg dst, uint8_t imm) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xC1);
+    emit_u8(buf, static_cast<uint8_t>(0xF8 | reg_low3(dst)));
+    emit_u8(buf, imm);
+}
+
+// and dst, imm8  (64-bit, sign-extended immediate)
+// Encoding: REX.W + 83 /4 ib.
+//
+// Only valid when the mask fits a signed byte. The 83 /4 ib form
+// SIGN-EXTENDS its immediate, so `and r, 1023` encoded this way masks with
+// 0xFFFFFFFFFFFFFFFF and does nothing at all -- a silently wrong result rather
+// than a crash, which is why emit_and_reg_imm32 exists and the caller has to
+// choose between them.
+inline void emit_and_reg_imm8(CodeBuffer& buf, Reg dst, int8_t imm) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0x83);
+    emit_u8(buf, static_cast<uint8_t>(0xE0 | reg_low3(dst)));
+    emit_u8(buf, static_cast<uint8_t>(imm));
+}
+
+// and dst, imm32  (64-bit, sign-extended immediate) -- the /4 form of the
+// group-1 ALU op, for masks that do not fit a signed byte.
+// Encoding: REX.W + 81 /4 id. /n: add=0, sub=5, cmp=7, and=4.
+inline void emit_and_reg_imm32(CodeBuffer& buf, Reg dst, int32_t imm) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0x81);
+    emit_u8(buf, static_cast<uint8_t>(0xE0 | reg_low3(dst)));
+    emit_u32_le(buf, static_cast<uint32_t>(imm));
+}
+
 // imul dst, src, imm32  (three-operand form, REX.W + 69 /r id).
 // Works even when dst == src.
 inline void emit_imul_reg_reg_imm32(CodeBuffer& buf, Reg dst, Reg src, int32_t imm) {
@@ -422,6 +481,26 @@ inline void emit_addsd(CodeBuffer& buf, Xmm dst, Xmm src) { emit_sse_sd_op(buf, 
 inline void emit_subsd(CodeBuffer& buf, Xmm dst, Xmm src) { emit_sse_sd_op(buf, 0x5C, dst, src); }
 inline void emit_mulsd(CodeBuffer& buf, Xmm dst, Xmm src) { emit_sse_sd_op(buf, 0x59, dst, src); }
 inline void emit_divsd(CodeBuffer& buf, Xmm dst, Xmm src) { emit_sse_sd_op(buf, 0x5E, dst, src); }
+
+// roundsd dst, src, imm8 -- round the double in src to integral, using the
+// current rounding mode selected by imm8. Used only to get truncation for
+// the float modulo sequence, so imm8 is fixed at 0x0B:
+//   imm8[2:0] = 3   round toward zero
+//   imm8[3]   = 1   suppress the precision (inexact) exception
+// Encoding: 66 0F 3A 0B /r ib. Needs the mandatory 0x3A escape byte, unlike
+// the arithmetic ops above. Verified: roundsd xmm12, xmm0, 0x0b =
+// 66 44 0f 3a 0b e0 0b (the 0x0B opcode byte was the missing piece).
+inline void emit_roundsd_imm8(CodeBuffer& buf, Xmm dst, Xmm src, uint8_t imm) {
+    if (xmm_is_extended(dst) || xmm_is_extended(src)) emit_u8(buf, rex_sse(dst, src));
+    emit_u8(buf, 0x66);
+    emit_u8(buf, 0x0F);
+    emit_u8(buf, 0x3A);
+    emit_u8(buf, 0x0B);
+    emit_u8(buf, modrm_reg_reg(static_cast<Reg>(xmm_low3(dst)), static_cast<Reg>(xmm_low3(src))));
+    emit_u8(buf, imm);
+}
+
+inline constexpr uint8_t kRoundTowardZeroSuppressInexact = 0x0B;
 
 // comisd xmm, xmm -- sets ZF/PF/CF like cmp, raising Invalid on either NaN.
 // Encoding: 66 0F 2F /r. Verified: comisd xmm0, xmm1 = 66 0f 2f c1.

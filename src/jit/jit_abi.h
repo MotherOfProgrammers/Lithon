@@ -81,6 +81,11 @@ inline constexpr Xmm kScratchFloatB = Xmm::XMM14;
 // A third, used only as the zero operand of the Div-by-zero comisd. XMM13 is
 // outside kFloatTempPool and is never written by anything else.
 inline constexpr Xmm kScratchFloatZero = Xmm::XMM13;
+// A fourth, used only as the one-off temporary of the float modulo sequence
+// (roundsd -> mulsd -> subsd), which needs a register that is neither
+// operand nor destination. XMM12, like XMM13, is outside kFloatTempPool and
+// is never written by anything else.
+inline constexpr Xmm kScratchFloatC = Xmm::XMM12;
 
 // Slot 0 of the float argument registers. Under SysV variadic calling
 // convention a double argument is passed in the first XMM register;

@@ -201,6 +201,12 @@ struct Analysis {
                         break;
 
                     case Op::Add: case Op::Sub: case Op::Mul:
+                    // Mod is typed like Mul, NOT like Div: int % int stays int,
+                    // so it must go through arith() unmodified. Routing it
+                    // through the Div case would force every modulo result to
+                    // Float and the native path would then take the double
+                    // branch for `7 % 2`, which is 1 and not 1.0.
+                    case Op::Mod:
                         raise(st.vals[in.result],
                               arith(val(st, in.args.at(0)), val(st, in.args.at(1))));
                         if (final_pass) check_arith_operands(st, block, in, verdict);
@@ -296,8 +302,8 @@ struct Analysis {
                               const lithon::ir::Instr& in, GuardVerdict* verdict) {
         using lithon::ir::Op;
         if (in.op != Op::Add && in.op != Op::Sub && in.op != Op::Mul &&
-            in.op != Op::Div && in.op != Op::Lt && in.op != Op::Gt &&
-            in.op != Op::Eq) {
+            in.op != Op::Div && in.op != Op::Mod && in.op != Op::Lt &&
+            in.op != Op::Gt && in.op != Op::Eq) {
             return;
         }
         std::string where = st.fn->name + "/" + block.label;
@@ -308,6 +314,7 @@ struct Analysis {
                 verdict->reasons.push_back(
                     where + ": operand %" + std::to_string(in.args[i]) +
                     " of " + (in.op == Op::Div ? "div" :
+                              in.op == Op::Mod ? "mod" :
                               in.op == Op::Add ? "add" :
                               in.op == Op::Sub ? "sub" :
                               in.op == Op::Mul ? "mul" :

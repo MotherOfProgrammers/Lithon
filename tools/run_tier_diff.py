@@ -92,6 +92,62 @@ block0:
     call print, %2
     return
 """, "tier1"),
+    # Float modulo, including the trunc-vs-floor cases that CPython's own %
+    # gets differently and so cannot live in tests/programs/float.py, which is
+    # compared against CPython. The two tiers must agree byte for byte.
+    #
+    # 1.0 % inf is the case that was actually wrong: n = trunc(1.0/inf) is 0,
+    # so the answer is the dividend, but the guard meant to skip the n*b
+    # multiply jumped to the addsd that normalizes signed zero, one
+    # instruction early, leaving 0 * inf to produce a NaN.
+    "float_mod_trunc_and_inf": ("""
+function main():
+block0:
+    %0 = const_f64 1e308
+    store big, %0
+    %1 = load big
+    %2 = load big
+    %3 = mul %1, %2
+    store inf, %3
+    %4 = load inf
+    %5 = load inf
+    %6 = sub %4, %5
+    store nan, %6
+    %7 = const_f64 7.5
+    %8 = const_f64 2.0
+    %9 = const_f64 -7.5
+    %10 = const_f64 -2.0
+    %11 = const_f64 -4.0
+    %12 = const_f64 1.0
+    %13 = const_f64 0.0
+    %14 = mod %7, %8
+    call print, %14
+    %15 = mod %9, %8
+    call print, %15
+    %16 = mod %7, %10
+    call print, %16
+    %17 = mod %9, %10
+    call print, %17
+    %18 = mod %11, %8
+    call print, %18
+    %19 = mod %12, %8
+    call print, %19
+    %20 = load inf
+    %21 = mod %12, %20
+    call print, %21
+    %22 = mod %13, %20
+    call print, %22
+    %23 = mod %20, %12
+    call print, %23
+    %24 = mod %20, %20
+    call print, %24
+    %25 = load nan
+    %26 = mod %12, %25
+    call print, %26
+    %27 = mod %25, %12
+    call print, %27
+    return
+""", "tier1"),
     "int_and_or_value_semantics": ("""
 function main():
 block0:

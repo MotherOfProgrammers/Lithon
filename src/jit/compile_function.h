@@ -538,22 +538,188 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         // uncaught std::runtime_error would at the top of hello/tier_runner.
         // Returning would fall through into whatever instruction follows the
         // call and execute garbage.
-        auto emit_float_zero_division_trap = [&]() {
-            // Spelled exactly as the interpreter spells it, prefix included:
-            // the interpreter throws runtime_error("interpreter: division by
-            // zero") and hello.cpp/tier_runner print "error: " + what(), so
-            // the interpreter's stderr line is "error: interpreter: division
-            // by zero". run_tier_diff.py compares stderr, so anything less
-            // than an exact match here is a diff.
-            constexpr const char* kZeroDivisionMessage =
-                "error: interpreter: division by zero\n";
-            emit_mov_reg_imm(code, abi::kArgRegs[0],
-                             reinterpret_cast<int64_t>(kZeroDivisionMessage));
+        // Report a fatal error through the host and return. The message must
+        // be spelled exactly as the interpreter spells it, prefix included:
+        // the interpreter throws runtime_error("interpreter: division by
+        // zero") and hello.cpp/tier_runner print "error: " + what(), so the
+        // interpreter's stderr line is "error: interpreter: division by
+        // zero". run_tier_diff.py compares stderr, so anything less than an
+        // exact match here is a diff.
+        auto emit_host_error_trap = [&](const char* message) {
+            emit_mov_reg_imm(code, abi::kArgRegs[0], reinterpret_cast<int64_t>(message));
             emit_mov_reg_imm(code, kR, reinterpret_cast<int64_t>(&host_report_error));
             emit_xor_zero(code, Reg::RAX);
             if (abi::kShadowSpace) emit_sub_rsp_imm32(code, abi::kShadowSpace);
             emit_call_reg(code, kR);
             if (abi::kShadowSpace) emit_add_rsp_imm32(code, abi::kShadowSpace);
+        };
+
+        auto emit_float_zero_division_trap = [&]() {
+            emit_host_error_trap("error: interpreter: division by zero\n");
+        };
+
+        // The integer counterpart. Distinct text on purpose: the interpreter
+        // says "modulo by zero", and run_tier_diff.py matches stderr exactly,
+        // so reusing the division string here would show up as a diff.
+        auto emit_int_zero_modulo_trap = [&]() {
+            emit_host_error_trap("error: interpreter: modulo by zero\n");
+        };
+
+        // Integer remainder, C semantics: the result takes the sign of the
+        // dividend, so this is truncation toward zero, NOT Python's floored
+        // `%`. Both engines implement the same rule, which is what makes the
+        // tier diff meaningful.
+        //
+        // Two shapes:
+        //
+        //  * A constant divisor that is a positive power of two becomes
+        //    `and` with (b-1). That equals `%` only for a non-negative
+        //    dividend -- for a negative one the `and` yields the low bits
+        //    with a cleared sign, so b has to be subtracted back out.
+        //    Worked example, because getting this wrong is the whole bug:
+        //    -7 % 4 is -3, and -7 & 3 is 1, so the fixup must be 1 - 4.
+        //
+        //    The sign test has to read the ORIGINAL dividend, not the masked
+        //    result, and the ordering below is load-bearing. Masking clears the
+        //    sign bit, so testing `dst` after the `and` sees a non-negative
+        //    value and the fixup never runs: -6 % 8 masked to -6 & 7 is 2, and
+        //    2 is positive, so the answer stays 2 instead of becoming -6. The
+        //    sar therefore runs against `lhs` first, while `lhs` still holds
+        //    the dividend.
+        //
+        //    And the subtraction is conditional on the masked result being
+        //    NON-ZERO, because a negative dividend that is an exact multiple
+        //    of b has remainder 0, not -b: -4 % 4 is 0, and an unconditional
+        //    fixup turns -4 & 3 (which is 0) into 0 - 4 = -4.
+        //
+        //  * Anything else is the hardware instruction: cqo to sign-extend
+        //    RAX into RDX, then idiv, which leaves the remainder in RDX.
+        //    RAX and RDX are BOTH in the allocatable temp pool (abi::kTempPool),
+        //    so clobbering them can destroy a live temporary. They are pushed
+        //    and popped around the sequence, and the result is staged in kR
+        //    before the pops, because `dst` may itself be RAX or RDX -- popping
+        //    the saved value over the top of the result would be a silent
+        //    wrong answer. The allocator has no notion of "this instruction
+        //    needs RAX:RDX", so it cannot be relied on to keep them free.
+        auto emit_int_modulo = [&](const Instr& in, Reg dst, Reg lhs, Reg rhs, bool rhs_is_imm,
+                                   int32_t imm) {
+            if (rhs_is_imm && imm > 0 && (imm & (imm - 1)) == 0) {
+                if (imm == 1) {
+                    // b == 1: the remainder is 0 whatever the dividend is.
+                    if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                    emit_xor_zero(code, dst);
+                    return;
+                }
+                // Sign of the ORIGINAL dividend, captured into kR before any
+                // masking. sar shifts in place, so kR is loaded from lhs first.
+                // kR is safe as scratch: it is permanent scratch and is never
+                // allocated to a value, while `dst` is either a pool register
+                // or kL, so the two can never collide.
+                // The dividend is normalized into `dst` FIRST, and the sign is
+                // derived from `dst` while it still holds the unmasked value.
+                // Reading the sign out of `lhs` instead looks equivalent and is
+                // not: if `lhs` happens to BE kR, the sar overwrites the
+                // dividend before the copy to dst, and dst then receives the
+                // already-shifted value. That only misfires for particular
+                // register assignments, which is why it survived until a
+                // fuzzer program with one fewer print landed on it.
+                //
+                // dst is never kR (a temp is either in kTempPool, which
+                // excludes R10/R11, or spilled and therefore reported as kL),
+                // so kR is always safe as the sign scratch here.
+                if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                emit_mov_reg_reg(code, kR, dst);
+                emit_sar_reg_imm8(code, kR, 63);
+                // The mask is b-1, which only fits a sign-extended byte for
+                // b <= 128. Above that it has to be the imm32 form: `and r,
+                // 1023` encoded as 83 /4 ib sign-extends 0xFF to all-ones and
+                // masks with nothing, so a large power-of-two divisor silently
+                // returned the dividend unchanged.
+                const int32_t mask = imm - 1;
+                if (fits_imm8(mask)) emit_and_reg_imm8(code, dst, static_cast<int8_t>(mask));
+                else emit_and_reg_imm32(code, dst, mask);
+                // if (dst != 0 && kR != 0) dst -= b
+                //
+                // Both guards jump to the END of the sequence, so the fall
+                // through is the "do the subtraction" case: the dividend was
+                // negative AND the masked remainder is nonzero. Written the
+                // other way round -- jumping to the end when the remainder is
+                // NONZERO -- the whole fixup is skipped for every dividend that
+                // actually needs it, which is the `-1 % 8 == 7` instead of -1
+                // case.
+                emit_test_reg_reg(code, dst);
+                JumpPatch remainder_is_zero = emit_jcc_rel32(code, Cond::Equal);
+                emit_test_reg_reg(code, kR);
+                JumpPatch skip = emit_jcc_rel32(code, Cond::Equal);
+                emit_sub_reg_imm32(code, dst, imm);
+                resolve_jump_patch(code, skip, code.size());
+                resolve_jump_patch(code, remainder_is_zero, code.size());
+                return;
+            }
+
+            // idiv raises #DE on a zero divisor, which would kill the process
+            // with a signal instead of the interpreter's clean error + exit(1).
+            if (rhs_is_imm && imm == 0) {
+                emit_int_zero_modulo_trap();
+                return;
+            }
+            if (rhs_is_imm && imm == -1) {
+                // a % -1 is 0 for every representable a, INCLUDING
+                // INT64_MIN, whose quotient would be 2^63 and which is the one
+                // input that makes idiv raise #DE. Testing for the divisor up
+                // front is both the fix and a speedup: the whole division
+                // collapses to a zero.
+                if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                emit_xor_zero(code, dst);
+                return;
+            }
+            if (!rhs_is_imm) {
+                if (rhs == Reg::RAX || rhs == Reg::RDX) {
+                    // The divisor is about to be overwritten by the sequence.
+                    emit_mov_reg_reg(code, kR, rhs);
+                    rhs = kR;
+                }
+                // Runtime divisor: two guards, because idiv faults on two
+                // different inputs. A zero divisor, and a -1 divisor paired
+                // with an INT64_MIN dividend (quotient 2^63, unrepresentable).
+                // The -1 case folds to a zero for every other dividend, so it
+                // doubles as the fast path.
+                emit_test_reg_reg(code, rhs);
+                JumpPatch divisor_ok = emit_jcc_rel32(code, Cond::NotEqual);
+                emit_int_zero_modulo_trap();
+                resolve_jump_patch(code, divisor_ok, code.size());
+
+                emit_cmp_reg_imm32(code, rhs, -1);
+                JumpPatch not_minus_one = emit_jcc_rel32(code, Cond::NotEqual);
+                if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                emit_xor_zero(code, dst);
+                JumpPatch past_zero = emit_jmp_rel32(code);
+                resolve_jump_patch(code, not_minus_one, code.size());
+                emit_push_reg(code, Reg::RAX);
+                emit_push_reg(code, Reg::RDX);
+                if (lhs != Reg::RAX) emit_mov_reg_reg(code, Reg::RAX, lhs);
+                emit_cqo(code);
+                emit_idiv_reg(code, rhs);
+                // Stage the remainder somewhere that is neither RAX nor RDX
+                // before unwinding the saved pair.
+                if (kR != Reg::RDX) emit_mov_reg_reg(code, kR, Reg::RDX);
+                emit_pop_reg(code, Reg::RDX);
+                emit_pop_reg(code, Reg::RAX);
+                if (dst != kR) emit_mov_reg_reg(code, dst, kR);
+                resolve_jump_patch(code, past_zero, code.size());
+                return;
+            }
+
+            emit_push_reg(code, Reg::RAX);
+            emit_push_reg(code, Reg::RDX);
+            if (lhs != Reg::RAX) emit_mov_reg_reg(code, Reg::RAX, lhs);
+            emit_cqo(code);
+            emit_mov_reg_imm(code, kR, imm);
+            emit_idiv_reg(code, kR);
+            if (kR != Reg::RDX) emit_mov_reg_reg(code, kR, Reg::RDX);
+            emit_pop_reg(code, Reg::RDX);
+            emit_pop_reg(code, Reg::RAX);
+            if (dst != kR) emit_mov_reg_reg(code, dst, kR);
         };
 
         // ---- float (SSE2) helpers ---------------------------------------
@@ -701,10 +867,12 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             coerce_to_float(lhs_r, in.args.at(0));
             coerce_to_float(rhs_r, in.args.at(1));
 
-            if (in.op == Op::Div) {
+            if (in.op == Op::Div || in.op == Op::Mod) {
                 // Python raises ZeroDivisionError for any zero divisor, so the
                 // JIT checks and calls the same host handler the interpreter
-                // ends up in.
+                // ends up in. Mod reuses the whole mechanism with its own
+                // message, because the interpreter says "modulo by zero" and
+                // run_tier_diff.py compares stderr byte-for-byte.
                 //
                 // A NaN divisor must NOT trap: Python propagates nan
                 // (1.0/nan is nan, not an error). That case cannot be handled
@@ -737,7 +905,8 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                 // ordered zero. A NaN divisor leaves kL clear (PF forced
                 // !PF to 0) and therefore propagates instead of trapping.
                 JumpPatch skip_trap = emit_jcc_rel32(code, Cond::Equal);
-                emit_float_zero_division_trap();
+                if (in.op == Op::Div) emit_float_zero_division_trap();
+                else emit_int_zero_modulo_trap();
                 resolve_jump_patch(code, skip_trap, code.size());
             }
 
@@ -745,7 +914,78 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             if (in.op == Op::Add) emit_addsd(code, dst, rhs_r);
             else if (in.op == Op::Sub) emit_subsd(code, dst, rhs_r);
             else if (in.op == Op::Mul) emit_mulsd(code, dst, rhs_r);
-            else emit_divsd(code, dst, rhs_r);
+            else if (in.op == Op::Div) {
+                emit_divsd(code, dst, rhs_r);
+            } else {
+                // There is no SSE2 fmod: `fmod` is a libm call, and calling
+                // one per modulo would be far more expensive than the
+                // interpreter this is supposed to be matching. C defines fmod
+                // as a - n*b for the integer n = trunc(a/b), and when n is 0 the
+                // answer is just a, so the general form is:
+                //   movsd    tmp, dst, a         copy the dividend (3rd XMM)
+                //   divsd    tmp, tmp, rhs       a / b
+                //   roundsd  tmp, tmp, to-zero   n = trunc(a/b)
+                //   mulsd    tmp, tmp, rhs       n * b
+                //   subsd    dst, dst, tmp       a - n*b
+                //
+                // The two operands are in scratch registers (lhs_r/rhs_r), and
+                // dst may be either lhs_r or a pool register, so n is built in
+                // kScratchFloatC and subtracted from the ORIGINAL dividend,
+                // which is still live in dst. Clobbering dst with the quotient
+                // first and multiplying it in place computes (a/b)*trunc(a/b) - b,
+                // which is not fmod at all.
+                constexpr Xmm kT = abi::kScratchFloatC;
+                emit_movsd_xmm_xmm(code, kT, dst);
+                emit_divsd(code, kT, rhs_r);
+                emit_roundsd_imm8(code, kT, kT, kRoundTowardZeroSuppressInexact);
+
+                // Skip the last two steps when n is an ordered zero, because
+                // dst already holds the correct answer. n == 0 is exactly the
+                // case |a| < |b|, where fmod(a, b) is a, and it is also the ONLY
+                // case where the multiply can go wrong: IEEE makes 0 * inf a
+                // NaN, but C's fmod(1.0, inf) is 1.0, since n*b is 0 for every
+                // b when n is 0. So without this guard the sequence returns NaN
+                // for a finite dividend and an infinite divisor.
+                //
+                // A NaN quotient is unordered, so comisd sets ZF for it as well;
+                // the setcc-and-not-parity shape distinguishes a real zero from an
+                // unordered one, and a NaN must fall through to the multiply,
+                // which reproduces the NaN. (The other two infinite cases need no
+                // special handling: fmod(inf, 1.0) is inf - inf = NaN, and
+                // fmod(inf, inf) is inf - NaN = NaN.)
+                //
+                // kScratchFloatZero is live here: the zero-divisor test above
+                // materialized it, and nothing since has overwritten it.
+                emit_comisd(code, kT, abi::kScratchFloatZero);
+                emit_setcc(code, Cond::Equal, abi::kScratchLeft);
+                emit_movzx_reg_reg8(code, abi::kScratchLeft, abi::kScratchLeft);
+                emit_setcc(code, Cond::NotParity, abi::kScratchRight);
+                emit_movzx_reg_reg8(code, abi::kScratchRight, abi::kScratchRight);
+                emit_and_reg_reg(code, abi::kScratchLeft, abi::kScratchRight);
+                emit_test_reg_reg(code, abi::kScratchLeft);
+                // test sets ZF iff kL == 0, i.e. iff n is NOT an ordered zero, so
+                // Cond::NotEqual (ZF clear) is taken exactly when n IS an ordered
+                // zero and dst already holds the right answer.
+                //
+                // The jump target must therefore land after the multiply and
+                // subtract: those two are the steps the guard exists to skip,
+                // since 0 * inf is the NaN this branch exists to avoid. Landing
+                // on the addsd instead would still run the multiply.
+                //
+                // The addsd sits after the subsd so that both paths reach it.
+                // dst is left as the raw dividend, so an exact division of a
+                // negative dividend would otherwise yield -0.0 where the
+                // subsd path yields +0.0. IEEE defines x - x as +0.0, and the
+                // interpreter normalizes fmod's zero result to +0.0 to match,
+                // so the skip path has to add the zero register to force the
+                // same normalization: -0.0 + 0.0 is +0.0, and adding 0.0 to any
+                // other value is a no-op.
+                JumpPatch ordered_zero = emit_jcc_rel32(code, Cond::NotEqual);
+                emit_mulsd(code, kT, rhs_r);
+                emit_subsd(code, dst, kT);
+                resolve_jump_patch(code, ordered_zero, code.size());
+                emit_addsd(code, dst, abi::kScratchFloatZero);
+            }
             commit_float_result(in.result, dst);
         };
 
@@ -921,7 +1161,8 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             case Op::Add:
             case Op::Sub:
             case Op::Mul:
-            case Op::Div: {
+            case Op::Div:
+            case Op::Mod: {
                 // The float path is a separate case body rather than extra
                 // branches inside the integer one: an int temp and a double
                 // temp are different storage, so mixing them in one block
@@ -933,6 +1174,13 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                                         : compute_dest(instr.result);
                         Reg lhs = read_left(instr.args.at(0));
                         int32_t imm = 0;
+                        if (instr.op == Op::Mod) {
+                            const bool rhs_is_imm = imm32_of(instr.args.at(1), imm);
+                            const Reg rhs = rhs_is_imm ? kR : read_right(instr.args.at(1));
+                            emit_int_modulo(instr, dst, lhs, rhs, rhs_is_imm, imm);
+                            if (!fused) commit_result(instr.result, dst);
+                            break;
+                        }
                         if (imm32_of(instr.args.at(1), imm)) {
                             if (instr.op == Op::Mul) {
                                 emit_imul_reg_reg_imm32(code, dst, lhs, imm);

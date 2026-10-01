@@ -365,6 +365,21 @@ private:
                     reg_types_[instr.result] = LType{"int", std::max(lhs.width, rhs.width)};
                 return;
             }
+            case Op::Mod:
+                // Shaped like Mul, NOT like Div. Div unconditionally widens
+                // because a quotient generally is not an integer; a remainder
+                // never leaves the domain, so int % int stays int. Typing it
+                // as Div would mean `7 % 2` is 1.0, and typing it as anything
+                // that narrows would contradict the "narrowing is never
+                // allowed" invariant enforced above.
+                {
+                    LType lhs, rhs;
+                    if (!reg_type(instr.args.at(0), lhs) || !reg_type(instr.args.at(1), rhs)) return;
+                    if (lhs.kind == "float" || rhs.kind == "float") reg_types_[instr.result] = LType{"float", 64};
+                    else if (lhs.kind == "int" && rhs.kind == "int")
+                        reg_types_[instr.result] = LType{"int", std::max(lhs.width, rhs.width)};
+                    return;
+                }
             case Op::Div:
                 // Per V1_SPEC 0.2: any division is true division and
                 // always produces float.

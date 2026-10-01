@@ -73,6 +73,21 @@ def parse_type_annotation(node):
 ENTRY_POINT = "__main__"
 MANGLED_PREFIX = "user_"
 
+# One table, used by both BinOp and AugAssign. It used to be duplicated as a
+# literal dict at each site, which is exactly the kind of drift that lets a
+# new operator work in `a + b` and silently fail in `a += b`.
+#
+# `%` is `mod`, and is NOT the same shape as `div`: div always widens to float
+# (a quotient generally is not an integer), while mod is typed like mul (int
+# iff both operands are int) and keeps C's truncating remainder semantics.
+BINARY_OPS = {
+    ast.Add: "add",
+    ast.Sub: "sub",
+    ast.Mult: "mul",
+    ast.Div: "div",
+    ast.Mod: "mod",
+}
+
 
 class IRBuilder:
     def __init__(self, fn_rename=None):
@@ -125,7 +140,7 @@ class IRBuilder:
         if isinstance(node, ast.BinOp):
             left = self.build_expr(node.left)
             right = self.build_expr(node.right)
-            op_map = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div"}
+            op_map = BINARY_OPS
             op_type = type(node.op)
             if op_type not in op_map:
                 raise NotImplementedError(f"operator {op_type.__name__} not supported yet")
@@ -322,7 +337,7 @@ class IRBuilder:
             # both execution tiers see one canonical shape.
             if not isinstance(node.target, ast.Name):
                 raise NotImplementedError("only simple name targets are supported for augmented assignment")
-            op_map = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div"}
+            op_map = BINARY_OPS
             op_type = type(node.op)
             if op_type not in op_map:
                 raise NotImplementedError(f"augmented operator {op_type.__name__} not supported yet")

@@ -40,6 +40,7 @@ bitwise) -- see src/frontend/frontend.py. That is a real language gap, not
 a fuzzer limitation; this tool can start covering them the day they exist.
 
     tools/fuzz_diff.py --floats          # float programs: arithmetic, compares, printing
+    tools/fuzz_diff.py --mod             # integer modulo: powers of two, idiv, zero divisor
 
 --floats is a separate mode rather than a tweak to the int generators because
 the int generators annotate every variable int[64], and a float cannot be
@@ -49,6 +50,14 @@ already paid for itself: it is what found a float temporary being clobbered
 across a call, `%g` picking exponent notation by precision rather than by
 value, std::stod rejecting every subnormal literal, and a NaN divisor taking
 the division-by-zero trap.
+
+--mod exists because modulo is the one operator where the CPython oracle
+cannot referee the general case: C's `%` truncates toward zero and Python's
+floors, so the two agree only for non-negative operands. --mod therefore
+generates non-negative dividends and stays a meaningful CI gate, and
+--mod-negatives opts into the diverging shape (interpreter vs JIT is still
+enforced; the CPython comparison is expected to report the language gap, the
+same way --shared-loop-vars does).
 """
 import argparse
 import ast
@@ -122,13 +131,14 @@ class Gen:
         "1.0000000000000002", "0.30000000000000004", "-2.5", "1e6", "1e-6",
     ]
 
-    def __init__(self, seed, shared_loop_vars=False, floats=False):
+    def __init__(self, seed, shared_loop_vars=False, floats=False, mod_negatives=False):
         self.r = random.Random(seed)
         self.lines = []
         self.declared = set()
         self.float_declared = set()
         self.shared_loop_vars = shared_loop_vars
         self.floats = floats
+        self.mod_negatives = mod_negatives
         self.pool = self.FLOAT_VARS if floats else VARS
 
     def emit(self, indent, s):
@@ -319,6 +329,88 @@ class Gen:
     # So: at most 2 program variables plus 1 accumulator, and the only
     # statement shapes are ones that keep the multiply and its induction
     # variable in the canonical two-block counted loop.
+    def program_mod(self):
+        """Modulo-focused programs.
+
+        The whole point of a separate generator is the sign of the dividend.
+        C's `%` truncates toward zero and Python's floors, so `a % b` agrees
+        only when both are non-negative:
+
+            -7 % 3   C: -1    Python: 2
+            -7 % 4   C: -3    Python: 1
+
+        This mode therefore generates NON-NEGATIVE dividends by default, which
+        keeps the CPython secondary oracle meaningful and the mode usable in
+        CI. --mod-negatives generates the diverging shape, where the
+        interpreter/JIT agreement is still enforced but the CPython comparison
+        is expected to report the known language gap (the same treatment
+        --shared-loop-vars gets).
+
+        Divisors are chosen to hit each emitted shape:
+          1, 2, 4, 8, 16, 1024  a power of two -> the `and` + sign-fixup path
+          3, 5, 7, 10, 100      imm32 non-power-of-two -> idiv with a constant
+          0                      the runtime/modulo-by-zero trap
+          a declared variable    idiv reading a register that may be RAX or RDX
+        """
+        self.lines = []
+        self.declared = set()
+
+        # Keep every dividend non-negative unless the caller opted into the
+        # diverging shape: the CPython oracle cannot referee those.
+        def nonneg_atom():
+            if self.declared and self.r.random() < 0.6:
+                return self.r.choice(sorted(self.declared))
+            return str(self.r.randint(0, 12))
+
+        def dividend_atom(allow_negative):
+            if allow_negative and self.r.random() < 0.45:
+                return "-" + str(self.r.randint(1, 12))
+            return nonneg_atom()
+
+        const_divisors = [1, 2, 3, 4, 5, 7, 8, 10, 16, 100, 1024, 0]
+        allow_negative = self.mod_negatives
+
+        # Two live variables, so RAX and RDX are genuinely occupied when the
+        # idiv sequence runs -- that is the clobber hazard this mode exists
+        # to hit, and it cannot show up if the divisor is a literal.
+        x = self.fresh_var()
+        y = self.fresh_var(exclude={x})
+        self.declare(0, x, nonneg_atom())
+        self.declare(0, y, nonneg_atom())
+
+        for _ in range(self.r.randint(4, 10)):
+            a = dividend_atom(allow_negative)
+            shape = self.r.random()
+            if shape < 0.25:
+                b = str(self.r.choice(const_divisors))
+            elif shape < 0.45:
+                b = y                                     # divisor in a register
+            elif shape < 0.55:
+                b = str(self.r.choice(const_divisors))    # both sides constant
+                a = str(self.r.randint(0, 40)) if not allow_negative \
+                    else str(self.r.randint(-40, 40))
+            else:
+                b = str(self.r.choice(const_divisors))
+            k = self.r.random()
+            if k < 0.55:
+                self.emit(0, f"print({a} % {b})")
+            elif k < 0.7:
+                # `%=` lowers to the same mod instruction but through a store,
+                # so the result also has to survive a variable write/read.
+                tgt = self.r.choice(sorted(self.declared))
+                self.emit(0, f"{tgt} %= {b}")
+                self.emit(0, f"print({tgt})")
+            elif k < 0.85:
+                tgt = self.r.choice(sorted(self.declared))
+                self.emit(0, f"{tgt} = {a} % {b}")
+                # a print between statements keeps values live across a call
+                self.emit(0, f"print({x})")
+                self.emit(0, f"print({tgt})")
+            else:
+                # chained, to nest a modulo inside a larger expression
+                self.emit(0, f"print(({a} % {b}) + {nonneg_atom()})")
+        return "\n".join(self.lines) + "\n"
+
     def program_lsr(self):
         self.lines = []
         self.declared = set()
@@ -424,19 +516,25 @@ def evaluate(py_path: Path, tmp_ir: Path):
 
     interp = run([str(HELLO), str(tmp_ir)])
 
-    # A division-by-zero trap is a *result*, not a rejection: the interpreter
-    # prints "error: interpreter: division by zero" and exits 1, and the JIT
-    # prints the same line and exits 1. Both engines are supposed to do that,
-    # so the program is worth comparing -- it exercises the emitted zero test
-    # (comisd sets ZF for an unordered compare as well as for an equal one, so
-    # the check has to be ZF AND !PF or it traps on a NaN divisor instead).
-    # Skipping these would throw away precisely the code most likely to be
-    # wrong; --floats generated 21 of them in 300 programs.
+    # A divide/modulo-by-zero trap is a *result*, not a rejection: the
+    # interpreter prints "error: interpreter: division by zero" (or "modulo by
+    # zero") and exits 1, and the JIT prints the same line and exits 1. Both
+    # engines are supposed to do that, so the program is worth comparing -- it
+    # exercises the emitted zero test (comisd sets ZF for an unordered compare
+    # as well as for an equal one, so the check has to be ZF AND !PF or it
+    # traps on a NaN divisor instead). Skipping these would throw away precisely
+    # the code most likely to be wrong; --floats generated 21 of them in 300
+    # programs.
     #
-    # Only that one message is treated this way. Every other nonzero exit is a
-    # typecheck or other rejection, which is not what this fuzzer is about.
+    # Only those two messages are treated this way. Every other nonzero exit is
+    # a typecheck or other rejection, which is not what this fuzzer is about.
+    # The two are kept as separate strings on purpose: the interpreter spells
+    # them differently and run_tier_diff.py diffs stderr byte-for-byte, so a
+    # single combined substring would still catch both.
+    interp_stderr = interp.stderr or ""
     is_div_trap = (interp.returncode == 1
-                   and "division by zero" in (interp.stderr or ""))
+                   and ("division by zero" in interp_stderr
+                        or "modulo by zero" in interp_stderr))
     if interp.returncode not in (0, TIMEOUT_RC) and not is_div_trap:
         return Result(True, reason="skip")
 
@@ -456,13 +554,23 @@ def evaluate(py_path: Path, tmp_ir: Path):
         return Result(False, *seen, reason="jit_vs_interp")
 
     # Both engines reached a nonzero exit that looks like a divide trap, so
-    # require that BOTH actually report "division by zero": one side trapping
-    # and the other exiting 1 for some other reason is a divergence even though
-    # rc and stdout already matched. The stderr lines are not compared verbatim
-    # because tier_runner also writes its "[tier1] native" / "[tier0]
-    # interpreter" banner there, which is not part of the program's output.
-    interp_trapped = "division by zero" in (interp.stderr or "")
-    jit_trapped = "division by zero" in (jit.stderr or "")
+    # require that BOTH actually report it: one side trapping and the other
+    # exiting 1 for some other reason is a divergence even though rc and stdout
+    # already matched. The stderr lines are not compared verbatim because
+    # tier_runner also writes its "[tier1] native" / "[tier0] interpreter"
+    # banner there, which is not part of the program's output.
+    #
+    # The message text is compared too, not just its presence: a program that
+    # traps on modulo in the interpreter must not appear as a division trap in
+    # the JIT, and the two spellings are the only way to tell them apart.
+    def trap_text(stderr):
+        for m in ("modulo by zero", "division by zero"):
+            if m in (stderr or ""):
+                return m
+        return None
+
+    interp_trapped = trap_text(interp.stderr)
+    jit_trapped = trap_text(jit.stderr)
     if (interp.returncode != 0 or jit.returncode != 0) and not both_hang:
         if interp_trapped != jit_trapped:
             return Result(False, *seen, reason="jit_vs_interp")
@@ -538,6 +646,11 @@ def main():
                          "for-loop divergence from CPython; see the docstring)")
     ap.add_argument("--floats", action="store_true",
                     help="generate flat float programs (arithmetic, comparisons, printing, int/float mixing)")
+    ap.add_argument("--mod", action="store_true",
+                    help="use the modulo-focused generator (see Gen.program_mod)")
+    ap.add_argument("--mod-negatives", action="store_true",
+                    help="let --mod generate negative dividends, where C's truncating %% and Python's "
+                         "floored %% disagree; the CPython oracle then reports the known language gap")
     args = ap.parse_args()
     TIMEOUT = args.timeout
     global UNROLL_DIAMONDS
@@ -555,9 +668,12 @@ def main():
     n_ok = n_skip = n_fail = 0
     by_reason = {}
     for seed in range(args.seed, args.seed + args.count):
-        gen = Gen(seed, args.shared_loop_vars, floats=args.floats)
+        gen = Gen(seed, args.shared_loop_vars, floats=args.floats,
+                  mod_negatives=args.mod_negatives)
         if args.floats:
             src = gen.float_program()
+        elif args.mod:
+            src = gen.program_mod()
         elif args.diamond:
             src = gen.program_diamond()
         elif args.lsr:

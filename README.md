@@ -219,14 +219,61 @@ clock, one pinned core. See [Testing](#-testing) to reproduce them yourself.
 - **`Phi` has no emitter.** The IR can express it; the encoder cannot yet. It
   is the only missing opcode, and is needed for `if`-as-expression lowering
   once both arms must merge without a stack round-trip.
-- Net: **19 of the 20 IR opcodes are emitted.** The one missing one is `Phi`.
+- Net: **20 of the 21 IR opcodes are emitted.** The one missing one is `Phi`.
+
+### `%` is C's `%`, not Python's
+
+This is the one place where Lithon deliberately does **not** follow Python, so
+it is worth stating plainly rather than leaving to a comment in `ir.h`.
+
+```python
+print(-7 % 3)   # Lithon: -1     CPython: 2
+print(7 % -3)   # Lithon:  1     CPython: -2
+```
+
+`%` truncates toward zero and takes the sign of the **dividend**, which is what
+C, Rust, Java and every other compiled language do. CPython floors instead, so
+its remainder has the sign of the **divisor**. Both engines here implement the
+truncating rule, which is what makes the tier diff a meaningful check rather
+than two engines agreeing on a shared mistake.
+
+The reason is the one C gives: a remainder never leaves the domain of its
+operands, so `Mod` is typed like `Mul` (int iff both operands are int) rather
+than like `Div`, which must widen to float because a quotient generally is not
+an integer. Typing it as `Div` would make `7 % 3` a `float` and lose the point.
+
+Consequences worth knowing, all covered by tests:
+
+- A zero divisor **traps** on both engines, like `Div`, with its own message
+  (`modulo by zero`) so the two are distinguishable in a diff.
+- `INT64_MIN % -1` is `0`. It is the one input that makes hardware `idiv` raise
+  `#DE`, since the quotient would be 2⁶³, so the divisor is tested up front and
+  the whole division collapses to a zero.
+- Float `Mod` has **no SSE2 instruction** — `fmod` is a libm call, and calling
+  one per modulo would be far more expensive than the interpreter this is
+  meant to be replacing. It is computed as `a - n*b` for `n = trunc(a/b)`, the
+  definition C uses. The interesting case is `n == 0`, which happens exactly
+  when `|a| < |b|`, and it is the *only* case where the multiply can go wrong:
+  IEEE makes `0 * inf` a NaN, but `n*b` is 0 for every `b` when `n` is 0, so
+  C's `fmod(1.0, inf)` is `1.0`. The guard that skips the multiply has to
+  distinguish a real zero quotient from a NaN one using the same `ZF AND !PF`
+  shape as the zero-divisor check, because `comisd` sets ZF for an unordered
+  compare too.
+- A zero remainder is normalized to `+0.0` to match CPython, which does not
+  preserve the dividend's sign for a zero remainder. C's `fmod(-4.0, 2.0)` is
+  `-0.0`; Lithon prints `0.0`. This is a conscious divergence, chosen so the
+  float and integer paths agree with each other.
+
+Integer `Mod` is also strength-reduced where it is exact: a constant divisor
+that is a power of two becomes a mask plus a sign fixup, since `-7 & 3` is `1`
+and not the `-3` that `-7 % 4` has to return.
 
 ### Floating point, and what "identical" had to mean
 
 `float` is implemented end-to-end: `ConstFloat`, load/store, `Add`/`Sub`/`Mul`/
-`Div`, the three comparisons, and native `print()`. Both tiers now run
+`Div`/`Mod`, the three comparisons, and native `print()`. Both tiers now run
 `float.ir`, `mixed_numeric.ir` and `comparison.ir` natively, with
-`run_tier_diff.py` reporting 33/33 native and zero interpreter fallbacks.
+`run_tier_diff.py` reporting 34/34 native and zero interpreter fallbacks.
 
 The hard part was not the arithmetic — SSE2 is straightforward once the
 encoding is right — it was making the two engines agree *byte for byte*, since
@@ -344,7 +391,7 @@ The tests are not all the same kind, and it is worth knowing which is which:
 bash tools/verify_all.sh                         # ABI, stack alignment, callee-saved audit
 python3 tools/run_regression.py                  # 12/12 untyped programs
 python3 tools/run_typed_regression.py            # 12/12 typed programs
-python3 tools/run_tier_diff.py                   # 33/33
+python3 tools/run_tier_diff.py                   # 34/34
 ```
 
 `run_tier_diff.py` is the highest-value of the four. It runs every program
@@ -359,6 +406,8 @@ python3 tools/fuzz_diff.py --count 300             # general programs
 python3 tools/fuzz_diff.py --count 300 --lsr       # strength-reduction shapes
 python3 tools/fuzz_diff.py --count 300 --diamond   # diamond-unroll shapes
 python3 tools/fuzz_diff.py --count 300 --floats    # int/float mixes, div, calls
+python3 tools/fuzz_diff.py --mod --count 300       # modulo, any signs
+python3 tools/fuzz_diff.py --mod-negatives --count 300   # modulo, negative operands
 ```
 
 The JIT's output is compared against the interpreter, and the interpreter's
@@ -370,7 +419,16 @@ generator almost never reaches those two passes; without them they would be
 essentially untested. `--floats` exists because the general generator annotates
 every variable `int[64]` and so emits no `const_f64` at all — that mode found a
 real miscompile (an `Unknown`-kind operand lowered as *integer* arithmetic) that
-four general modes had never approached. Mismatches are written to
+four general modes had never approached.
+
+`--mod-negatives` is the mode to reach for when changing modulo, with one caveat:
+because Lithon's `%` truncates and CPython's floors, most of its CPython
+disagreements are *expected* language gaps rather than bugs, and the mode reports
+them separately. The number that must stay at zero is the interpreter-vs-JIT
+mismatch count. Neither modulo mode generates infinities or NaNs, so the
+`0 * inf` class of bug needs the adversarial `run_tier_diff.py` case instead.
+
+Mismatches are written to
 `fuzz_failures/`, minimised,
 and printed.
 
@@ -442,20 +500,25 @@ python3 tools/native_bench.py --runs 30 --compare /tmp/before.json
 ### What a green run does not prove
 
 The test suite covers the subset of the language the engine supports today.
-Floats and `Div` now work, so they have moved out of the gaps list; what remains
-unimplemented is `Phi` and support for more than two arguments, and those are
-listed [above](#known-gaps--the-honest-list) precisely so a green run is not
-mistaken for a complete one. If you add support for one of them, the honest
-next step is to move it out of that list.
+Floats, `Div` and `Mod` now work, so they have moved out of the gaps list; what
+remains unimplemented is `Phi` and support for more than two arguments, and
+those are listed [above](#known-gaps--the-honest-list) precisely so a green run
+is not mistaken for a complete one. If you add support for one of them, the
+honest next step is to move it out of that list.
 
 Two more limits worth stating plainly, because a passing run can obscure both:
 
-- **Opcode coverage is not operand coverage.** 19 of 20 opcodes are emitted and
+- **Opcode coverage is not operand coverage.** 20 of 21 opcodes are emitted and
   each is exercised through `tier_runner --strict`, so a pass proves the opcode
   was genuinely executed natively rather than fallen back. It does *not* prove
   every operand shape is right — that is what `encoder_test`'s byte-exact
   assertions and the fuzz modes are for. `gt` and `not`, for instance, have a
-  single native use each in the checked-in `.ir` corpus.
+  single native use each in the checked-in `.ir` corpus. `Mod` is a standing
+  example of why the two are different: the general fuzzer only ever emits
+  finite constants, so it cannot generate `1.0 % inf`, which was returning NaN
+  natively while the interpreter was correct. That case is pinned by an
+  adversarial `run_tier_diff.py` entry that *requires* the native tier, so a
+  future guard change cannot make it silently fall back and hide the bug.
 - **The interpreter is an oracle, not a specification.** Where Lithon and
   CPython disagree, `run_tier_diff.py` reports it separately as a language gap
   rather than a JIT bug — loop variables are one known case, deliberate. That

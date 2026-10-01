@@ -72,3 +72,42 @@ print(nan == nan)
 # just as it does for an equal one, so branching on "not equal" could not tell
 # "equal" from "unordered" and took the trap.
 print(1.0 / nan)
+
+# --- modulo -------------------------------------------------------------
+# Modulo is a - n*b for n = trunc(a/b), so the remainder takes the sign of
+# the dividend. These are the cases where that agrees with CPython's %,
+# which is why they can live in a file compared against CPython: a positive
+# dividend over a positive divisor. The trunc-vs-floor disagreements
+# (a negative dividend, or a negative divisor) are covered as adversarial
+# native-tier cases in tools/run_tier_diff.py instead, since CPython's %
+# floors and would make the expected output here wrong.
+print(7.5 % 2.0)
+# An exact division has a zero remainder. We normalize it to +0.0, matching
+# CPython, which does not preserve the dividend's sign for a zero remainder:
+# -4.0 % 2.0 prints 0.0 and not -0.0. Note this differs from C fmod, which
+# returns -0.0 here; the interpreter and the JIT agree with each other and
+# with CPython, which is what the expected output is recorded from.
+print(3.0 % 2.0)
+print(-4.0 % 2.0)
+# A dividend smaller in magnitude than the divisor is its own remainder.
+print(1.0 % 2.0)
+# --- modulo against inf and nan ---------------------------------------
+# inf is made by overflowing at run time; there is no inf literal.
+inf = 1e308 * 1e308
+nan = inf - inf
+# n = trunc(1.0/inf) is exactly 0, so the answer is the dividend, 1.0. This
+# is the case that has to skip the n*b multiply: IEEE says 0 * inf is NaN,
+# but n*b is 0 for every b when n is 0, so multiplying here produced a NaN
+# where C's fmod and CPython both give 1.0. The guard that skips the multiply
+# used to land on the addsd that normalizes signed zero instead, one
+# instruction too early, so the multiply still ran and this printed nan.
+print(1.0 % inf)
+# A zero dividend against inf is likewise its own remainder.
+print(0.0 % inf)
+# inf as the dividend is always NaN, because fmod(inf, b) is inf - inf.
+print(inf % 1.0)
+print(inf % inf)
+# NaN propagates in either position, and must not be mistaken for a zero
+# quotient by the "skip the multiply" guard.
+print(1.0 % nan)
+print(nan % 1.0)

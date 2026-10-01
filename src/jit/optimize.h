@@ -74,6 +74,24 @@ inline void fold_constants(lithon::ir::Function& fn, OptimizeStats& stats) {
                         rewrite(in, static_cast<int64_t>(r));
                     }
                     break;
+                case Op::Mod:
+                    // Only integer constants reach here: fold_constants has no
+                    // float lattice of its own, so a const_float operand makes
+                    // as_const() false and the case is skipped.
+                    if (in.args.size() == 2 && as_const(in.args[0], a) && as_const(in.args[1], b)) {
+                        // A zero divisor must NOT be folded. The interpreter
+                        // traps, and the JIT's runtime check is what produces
+                        // that trap; folding it to a constant here would turn a
+                        // diagnosed runtime error into a silently wrong answer.
+                        if (b == 0) break;
+                        // a % -1 is 0 for every a, including INT64_MIN, whose
+                        // quotient C++ leaves undefined and idiv traps on.
+                        if (b == -1) { rewrite(in, 0); break; }
+                        // C semantics (sign follows the dividend), matching
+                        // the interpreter and the emitted idiv.
+                        rewrite(in, static_cast<int64_t>(a % b));
+                    }
+                    break;
                 case Op::Lt:
                 case Op::Gt:
                 case Op::Eq:

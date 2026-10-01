@@ -23,6 +23,14 @@ enum class Op : uint8_t {
     Mul,
     Div,
 
+    // Integer/float remainder. Typed like Mul (int iff both operands are
+    // int, else float), NOT like Div: true division has to widen because a
+    // quotient generally is not an integer, but a remainder never leaves the
+    // domain. Semantics are C's, i.e. the sign follows the dividend and the
+    // result truncates toward zero -- NOT Python's floored `%`, where
+    // -7 % 3 is 2. See interpreter.cpp's apply_binop for why.
+    Mod,
+
     Lt,
     Gt,
     Eq,
