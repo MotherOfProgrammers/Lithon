@@ -173,16 +173,55 @@ clock, one pinned core. See [Testing](#-testing) to reproduce them yourself.
 
 ### Known gaps — the honest list
 
-- **Floating point is not implemented.** `ConstFloat` has no emitter, so
-  `comparison.ir` is refused and falls back to Tier-0. Separately, `float.ir`
-  and `mixed_numeric.ir` are declined by the *print guard* — they fail the
-  `print()` check before codegen is even attempted, because native `print()`
-  formats only `int` and `bool`. Both are the same underlying gap, hit at two
-  different stages, and together they are the largest coverage hole.
-- **`Div` and `Phi` have no emitter.** The IR can express them; the encoder
-  cannot yet.
-- Net: **17 of the 20 IR opcodes are emitted.** The three missing ones are
-  `ConstFloat`, `Div`, and `Phi`.
+- **`Phi` has no emitter.** The IR can express it; the encoder cannot yet. It
+  is the only missing opcode, and is needed for `if`-as-expression lowering
+  once both arms must merge without a stack round-trip.
+- Net: **19 of the 20 IR opcodes are emitted.** The one missing one is `Phi`.
+
+### Floating point, and what "identical" had to mean
+
+`float` is implemented end-to-end: `ConstFloat`, load/store, `Add`/`Sub`/`Mul`/
+`Div`, the three comparisons, and native `print()`. Both tiers now run
+`float.ir`, `mixed_numeric.ir` and `comparison.ir` natively, with
+`run_tier_diff.py` reporting 33/33 native and zero interpreter fallbacks.
+
+The hard part was not the arithmetic — SSE2 is straightforward once the
+encoding is right — it was making the two engines agree *byte for byte*, since
+that is the property everything else is measured against:
+
+- **Formatting is one function, called by both.** `host_format_double()` in
+  `float_runtime.h` is what emitted code calls and what the interpreter calls.
+  CPython's rule is the *shortest string that round-trips*, so neither `"%f"`
+  (which prints `3.500000`) nor `"%.17g"` (which prints `0.10000000000000001`)
+  is acceptable. `%.*g` is also wrong in a way that is easy to miss: it chooses
+  exponent notation based on the *precision it needed*, whereas CPython's
+  threshold is absolute — decimal exponent below −4 or above 16. That is why
+  `924966630.0` must print in full, not as `9.2499663e+08`.
+- **`Div` by zero traps on both engines**, matching Python's
+  `ZeroDivisionError` rather than IEEE `inf`/`nan`. The check cannot be a
+  single branch: `comisd` sets ZF, PF *and* CF together when the operands are
+  unordered, so ZF alone cannot separate "equal" from "NaN". The emitted code
+  computes `ZF AND !PF` in a GP register instead. A **NaN divisor must not
+  trap** — Python propagates — and `-0.0` must, since it compares equal to `0.0`.
+- **NaN compares false against everything**, including itself. The same
+  unordered-flag problem applies to `Lt`/`Gt`/`Eq`, and is excluded with
+  `setcc` + `AND setnp` rather than a parity branch: `0F 9A` is a byte-for-byte
+  collision between `jp rel32` and `setp r/m8`, so a parity `Jcc` is not
+  encodable here.
+- **A float live across a call spills.** Every XMM in the temp pool is
+  caller-saved on both ABIs, and `host_format_double` is an ordinary C function
+  that clobbers all of them, so leaving a float in one across a `call print`
+  silently corrupts it.
+- **The guard refuses a variable stored both an `int` and a `float`.** Its kind
+  joins to `Unknown`, and codegen only asks `is_float_value` — so it would lower
+  the arithmetic as *integer* operations over a double's bit pattern. Printing
+  the resulting `bool` hides this, because a comparison is always `bool` and so
+  always passes the print check.
+
+These are pinned by `float_format_test` (CPython `repr` transcribed by hand),
+the SSE2 byte-exact assertions in `encoder_test`, and a dedicated
+`tools/fuzz_diff.py --floats` mode — the general fuzzer annotates every variable
+`int[64]` and so never reached any of it.
 - **Arguments are capped at 2 per function and per call.**
 - **Branchy loop bodies are not unrolled.** The unroller is implemented,
   correct, and fuzzed — but it measured **1.10× slower** on an if/else loop
@@ -194,18 +233,16 @@ clock, one pinned core. See [Testing](#-testing) to reproduce them yourself.
 
 ### Next
 
-1. **`ConstFloat` emitter, then float `print()`** — closes the largest coverage
-   gap. Both halves are needed: the emitter alone leaves `float.ir` declined by
-   the guard, and the formatter alone leaves `comparison.ir` uncompilable.
-2. **`Div` and `Phi`** — `Div` is arithmetic the IR already models; `Phi` is
-   needed for `if`-as-expression lowering once both arms must merge without a
-   stack round-trip.
-3. **Lift the 2-argument cap** — most remaining test programs are blocked on it.
-4. **ARM64 backend** — the genuinely arch-agnostic layers are `ir/`, `liveness.h`,
+1. **`Phi`** — the last unemitted opcode, needed for `if`-as-expression
+   lowering once both arms must merge without a stack round-trip.
+2. **Lift the 2-argument cap** — most remaining test programs are blocked on it.
+3. **ARM64 backend** — the genuinely arch-agnostic layers are `ir/`, `liveness.h`,
    and `optimize.h` (they name no registers at all). `register_alloc.h` names
    registers only via `abi::kPromotionPool`. The x86-specific surface is
-   `x86_encoder.h` plus the emit calls in `compile_function.h`.
-5. **AOT emit** — Phase II below.
+   `x86_encoder.h` plus the emit calls in `compile_function.h`. `float_runtime.h`
+   is in that last group only in the sense that its formatter is shared — the
+   arithmetic and its `ZF AND !PF` zero test are not.
+4. **AOT emit** — Phase II below.
 
 > **Note:** Phase I is a work in progress. The engine is fast and well-tested on
 > the subset it supports, and it **refuses** what it cannot prove — that refusal
@@ -263,14 +300,20 @@ to the interpreter".
 python3 tools/fuzz_diff.py --count 300             # general programs
 python3 tools/fuzz_diff.py --count 300 --lsr       # strength-reduction shapes
 python3 tools/fuzz_diff.py --count 300 --diamond   # diamond-unroll shapes
+python3 tools/fuzz_diff.py --count 300 --floats    # int/float mixes, div, calls
 ```
 
 The JIT's output is compared against the interpreter, and the interpreter's
 against CPython — reported **separately**, because Lithon deliberately diverges
 from CPython for loop variables (`v == n` after a loop, not `n - 1`), so a
-CPython disagreement is not by itself a bug in the JIT. The `--lsr` and `--diamond` modes exist because the general
+CPython disagreement is not by itself a bug in the JIT. The `--lsr` and
+`--diamond` modes exist because the general
 generator almost never reaches those two passes; without them they would be
-essentially untested. Mismatches are written to `fuzz_failures/`, minimised,
+essentially untested. `--floats` exists because the general generator annotates
+every variable `int[64]` and so emits no `const_f64` at all — that mode found a
+real miscompile (an `Unknown`-kind operand lowered as *integer* arithmetic) that
+four general modes had never approached. Mismatches are written to
+`fuzz_failures/`, minimised,
 and printed.
 
 ### Layer 4 — read the generated code

@@ -53,11 +53,28 @@ jobs:
           ./liveness_test
           ./regalloc_test
 
-      - name: Run Untyped Regression Suite (11/11 expected)
+      - name: Run Untyped Regression Suite (12/12 expected)
         run: python3 tools/run_regression.py
 
       - name: Run Typed Verification Suite (12/12 expected)
         run: python3 tools/run_typed_regression.py
+
+      - name: Run Tier Differential Suite (JIT vs interpreter, byte-identical)
+        run: python3 tools/run_tier_diff.py
+
+      # The float formatter is the one function both engines call to render a
+      # double, so it is checked directly against CPython's repr rules here
+      # rather than only through a round-trip.
+      - name: Compile & Run Float Formatting Test
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Isrc/jit -o float_format_test src/jit/float_format_test.cpp
+          ./float_format_test
+
+      # --floats is separate from the general modes on purpose: the general
+      # generator annotates every variable int[64] and emits no const_f64, so
+      # without this the float paths are untested.
+      - name: Fuzz Int/Float Programs Against Both Engines
+        run: python3 tools/fuzz_diff.py --count 150 --floats
 
       - name: Compile Liveness & Register Allocation Tests
         run: |

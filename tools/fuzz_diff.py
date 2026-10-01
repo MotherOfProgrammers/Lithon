@@ -38,6 +38,17 @@ Bitwise operators (&, |, ^, <<, >>) are NOT generated: the frontend has no
 support for them at all yet (only `and`/`or`/`not`, which are boolean, not
 bitwise) -- see src/frontend/frontend.py. That is a real language gap, not
 a fuzzer limitation; this tool can start covering them the day they exist.
+
+    tools/fuzz_diff.py --floats          # float programs: arithmetic, compares, printing
+
+--floats is a separate mode rather than a tweak to the int generators because
+the int generators annotate every variable int[64], and a float cannot be
+declared that way. It emits flat, unannotated float programs instead. That
+mode is the only thing here that covers float codegen at all, and it has
+already paid for itself: it is what found a float temporary being clobbered
+across a call, `%g` picking exponent notation by precision rather than by
+value, std::stod rejecting every subnormal literal, and a NaN divisor taking
+the division-by-zero trap.
 """
 import argparse
 import ast
@@ -82,34 +93,84 @@ def run(cmd, **kw):
 # fires and muddies the diff.
 # ---------------------------------------------------------------------
 class Gen:
-    def __init__(self, seed, shared_loop_vars=False):
+    # Float mode. The int generator above cannot see any of the float
+    # machinery: it emits no float literals, never divides, and compares only
+    # ints, so float codegen was entirely uncovered by the fuzzer until this
+    # mode existed -- which is how a float temporary live across a `print`
+    # survived in a caller-saved XMM, and how `%g` choosing exponent notation
+    # by precision instead of by value went unnoticed.
+    #
+    # Deliberate choices, each of which is a case that has actually been wrong:
+    #   * `/` is generated, so the zero-divisor trap and the NaN-divisor
+    #     non-trap are both exercised.
+    #   * float and int atoms are mixed in the same expression, so the
+    #     int-to-double promotion and mixed comparison paths get hit.
+    #   * literals include subnormals and huge/tiny magnitudes, because the
+    #     round-trip formatter has a different code path for each and
+    #     std::stod used to reject every subnormal outright.
+    #   * a `print` is emitted *between* statements so values are live across
+    #     a call, which is the register-allocator case above.
+    FLOAT_VARS = ["p", "q", "r", "s"]
+
+    # Small decimals print as themselves; the wide ones stress the exponent
+    # threshold (CPython switches to exponent form only below 1e-4 or at/above
+    # 1e16) and the subnormals stress the short-round-trip search.
+    FLOAT_LITERALS = [
+        "0.0", "-0.0", "1.0", "-1.0", "0.5", "2.5", "3.5", "7.0", "0.1",
+        "1e16", "1e15", "1e-5", "1e-4", "1e300", "1e-300", "1.5e-8",
+        "5e-324", "2.2250738585072014e-308", "1.7976931348623157e308",
+        "1.0000000000000002", "0.30000000000000004", "-2.5", "1e6", "1e-6",
+    ]
+
+    def __init__(self, seed, shared_loop_vars=False, floats=False):
         self.r = random.Random(seed)
         self.lines = []
         self.declared = set()
+        self.float_declared = set()
         self.shared_loop_vars = shared_loop_vars
+        self.floats = floats
+        self.pool = self.FLOAT_VARS if floats else VARS
 
     def emit(self, indent, s):
         self.lines.append("    " * indent + s)
 
+    def float_atom(self):
+        if self.float_declared and self.r.random() < 0.7:
+            return self.r.choice(sorted(self.float_declared))
+        return self.r.choice(self.FLOAT_LITERALS)
+
     def atom(self):
-        if self.declared and self.r.random() < 0.7:
+        if not self.floats:
+            if self.declared and self.r.random() < 0.7:
+                return self.r.choice(sorted(self.declared))
+            return str(self.r.randint(0, 9))
+        # Float mode mixes int and float atoms freely: an int in a float
+        # expression is what forces the cvtsi2sd promotion, and a float in an
+        # otherwise-int context is what forces the guard to infer a float kind.
+        k = self.r.random()
+        if k < 0.5 and self.float_declared:
+            return self.r.choice(sorted(self.float_declared))
+        if k < 0.8:
+            return self.r.choice(self.FLOAT_LITERALS)
+        if self.declared and self.r.random() < 0.5:
             return self.r.choice(sorted(self.declared))
         return str(self.r.randint(0, 9))
 
     def fresh_var(self, exclude=()):
         """A VARS-pool name that is not already declared in this scope."""
-        free = [v for v in VARS if v not in self.declared and v not in exclude]
+        free = [v for v in self.pool if v not in self.declared and v not in exclude]
         if not free:
-            return self.r.choice(VARS)
+            return self.r.choice(self.pool)
         return self.r.choice(free)
 
     def expr(self, depth=0):
         k = self.r.random()
         if depth >= 2 or k < 0.4:
             return self.atom()
-        if k < 0.7:
-            return f"{self.expr(depth + 1)} + {self.expr(depth + 1)}"
-        return f"{self.expr(depth + 1)} - {self.expr(depth + 1)}"
+        # `/` is the important one: it is the only op that can trap, and the
+        # only one whose result is a float even when both operands are ints.
+        op = self.r.choice(["+", "-", "*", "/"] if self.floats else ["+", "-"])
+        return f"{self.expr(depth + 1)} {op} {self.expr(depth + 1)}"
 
     def cond(self):
         ops = ["<", ">", "=="]
@@ -122,6 +183,41 @@ class Gen:
     def declare(self, indent, name, value_expr):
         self.emit(indent, f"{name}: int[64] = {value_expr}")
         self.declared.add(name)
+
+    def float_program(self):
+        """A float-only program: no annotations, no loops, no helper calls.
+
+        Deliberately flat. Everything interesting about float support is in the
+        arithmetic, the comparison and the formatting, and a flat shape keeps
+        any mismatch attributable to one of those rather than to a control-flow
+        transform on top of it.
+        """
+        # Declare every float variable up front, so a later statement can read
+        # one that was written several statements earlier -- that distance is
+        # what pushes a value across a `print` and out of a register.
+        for v in self.FLOAT_VARS:
+            self.emit(0, f"{v} = {self.r.choice(self.FLOAT_LITERALS)}")
+            self.float_declared.add(v)
+
+        for _ in range(self.r.randint(4, 10)):
+            k = self.r.random()
+            if k < 0.35:
+                # Read a float, do arithmetic, print the result.
+                self.emit(0, f"print({self.expr(1)})")
+            elif k < 0.55:
+                # Compare and print the bool: exercises the setcc-and-not-parity
+                # path, including the NaN case.
+                self.emit(0, f"print({self.cond()})")
+            elif k < 0.7:
+                name = self.r.choice(sorted(self.float_declared))
+                self.emit(0, f"{name} = {self.expr(1)}")
+            elif k < 0.85:
+                # A bare int print between float statements: the call here is
+                # what a float value has to survive.
+                self.emit(0, f"print({self.r.randint(0, 9)})")
+            else:
+                self.emit(0, f"print({self.float_atom()})")
+        return "\n".join(self.lines) + "\n"
 
     def stmt(self, indent, depth):
         k = self.r.random()
@@ -170,6 +266,16 @@ class Gen:
         # nothing declared here needs to survive past the branch.
         wrote = False
         for _ in range(self.r.randint(1, 3)):
+            if self.floats:
+                # Float mode has no annotated int variables, so the only
+                # assignable state is the float pool.
+                if self.float_declared and self.r.random() < 0.7:
+                    name = self.r.choice(sorted(self.float_declared))
+                    self.emit(indent, f"{name} = {self.expr(1)}")
+                else:
+                    self.emit(indent, f"print({self.expr(1)})")
+                wrote = True
+                continue
             if self.declared and self.r.random() < 0.7:
                 name = self.r.choice(sorted(self.declared))
                 self.emit(indent, f"{name} = {self.expr()}")
@@ -317,8 +423,22 @@ def evaluate(py_path: Path, tmp_ir: Path):
     tmp_ir.write_text(fe.stdout)
 
     interp = run([str(HELLO), str(tmp_ir)])
-    if interp.returncode not in (0, TIMEOUT_RC):
-        return Result(True, reason="skip")   # typecheck (or other) rejection -- not our concern here
+
+    # A division-by-zero trap is a *result*, not a rejection: the interpreter
+    # prints "error: interpreter: division by zero" and exits 1, and the JIT
+    # prints the same line and exits 1. Both engines are supposed to do that,
+    # so the program is worth comparing -- it exercises the emitted zero test
+    # (comisd sets ZF for an unordered compare as well as for an equal one, so
+    # the check has to be ZF AND !PF or it traps on a NaN divisor instead).
+    # Skipping these would throw away precisely the code most likely to be
+    # wrong; --floats generated 21 of them in 300 programs.
+    #
+    # Only that one message is treated this way. Every other nonzero exit is a
+    # typecheck or other rejection, which is not what this fuzzer is about.
+    is_div_trap = (interp.returncode == 1
+                   and "division by zero" in (interp.stderr or ""))
+    if interp.returncode not in (0, TIMEOUT_RC) and not is_div_trap:
+        return Result(True, reason="skip")
 
     # The diamond unroller is off by default (it measured slower), so --diamond
     # has to opt in or it would fuzz a build that never runs the transform.
@@ -334,6 +454,18 @@ def evaluate(py_path: Path, tmp_ir: Path):
     both_hang = interp.returncode == TIMEOUT_RC and jit.returncode == TIMEOUT_RC
     if not both_hang and (jit.stdout != interp.stdout or jit.returncode != interp.returncode):
         return Result(False, *seen, reason="jit_vs_interp")
+
+    # Both engines reached a nonzero exit that looks like a divide trap, so
+    # require that BOTH actually report "division by zero": one side trapping
+    # and the other exiting 1 for some other reason is a divergence even though
+    # rc and stdout already matched. The stderr lines are not compared verbatim
+    # because tier_runner also writes its "[tier1] native" / "[tier0]
+    # interpreter" banner there, which is not part of the program's output.
+    interp_trapped = "division by zero" in (interp.stderr or "")
+    jit_trapped = "division by zero" in (jit.stderr or "")
+    if (interp.returncode != 0 or jit.returncode != 0) and not both_hang:
+        if interp_trapped != jit_trapped:
+            return Result(False, *seen, reason="jit_vs_interp")
 
     # 2. SECONDARY: what they agree on must match CPython (a language-semantics gap, not a JIT bug).
     if cpy.returncode == 0:
@@ -404,6 +536,8 @@ def main():
     ap.add_argument("--shared-loop-vars", action="store_true",
                     help="generate loop variables that are read/assigned elsewhere (reproduces the known "
                          "for-loop divergence from CPython; see the docstring)")
+    ap.add_argument("--floats", action="store_true",
+                    help="generate flat float programs (arithmetic, comparisons, printing, int/float mixing)")
     args = ap.parse_args()
     TIMEOUT = args.timeout
     global UNROLL_DIAMONDS
@@ -421,8 +555,10 @@ def main():
     n_ok = n_skip = n_fail = 0
     by_reason = {}
     for seed in range(args.seed, args.seed + args.count):
-        gen = Gen(seed, args.shared_loop_vars)
-        if args.diamond:
+        gen = Gen(seed, args.shared_loop_vars, floats=args.floats)
+        if args.floats:
+            src = gen.float_program()
+        elif args.diamond:
             src = gen.program_diamond()
         elif args.lsr:
             src = gen.program_lsr()

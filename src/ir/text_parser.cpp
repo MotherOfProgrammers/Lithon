@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <string>
 
 namespace lithon::ir {
 
@@ -200,7 +202,21 @@ Module parse_ir_text(const std::string& text) {
             instr.int_imm = std::stoll(oa.raw_args.at(0));
         } else if (oa.op_name == "const_f64") {
             instr.op = Op::ConstFloat;
-            instr.float_imm = std::stod(oa.raw_args.at(0));
+            // strtod directly, not std::stod. stod throws std::out_of_range
+            // whenever strtod reports ERANGE, and glibc sets ERANGE for a
+            // *subnormal* result, not just an overflowing one -- so every
+            // literal below about 2.2e-308 (1e-309, 5e-324, the smallest
+            // subnormal) was rejected as "error: stod" even though the value
+            // is perfectly representable. CPython accepts all of them.
+            // Underflow to a subnormal is the correct IEEE result, so ERANGE
+            // is deliberately not treated as an error; only a genuinely
+            // unparseable token is rejected.
+            const std::string& lit = oa.raw_args.at(0);
+            char* end = nullptr;
+            instr.float_imm = std::strtod(lit.c_str(), &end);
+            if (end == lit.c_str() || *end != '\0') {
+                throw std::runtime_error("const_f64 is not a number: " + lit);
+            }
         } else if (oa.op_name == "const_bool") {
             instr.op = Op::ConstBool;
             instr.int_imm = std::stoll(oa.raw_args.at(0));

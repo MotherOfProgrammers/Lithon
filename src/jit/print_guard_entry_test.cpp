@@ -56,12 +56,21 @@ int main() {
         expect("int/bool mixed through or is refused", m, false);
     }
 
-    // int / int is a float in the interpreter.
+    // int / int is a float, and a float is printable: the JIT formats doubles
+    // exactly the way the interpreter does, so native is safe.
     {
         Module m;
         m.functions = {fn("__main__", {}, {I(Op::ConstInt, 0, {}, "", 6), I(Op::ConstInt, 1, {}, "", 3),
                                            I(Op::Div, 2, {0, 1}), I(Op::Call, none, {2}, "print"), I(Op::Return, none)})};
-        expect("int / int (a float) is refused", m, false);
+        expect("int / int (a float) is printable", m, true);
+    }
+
+    // A direct float print is safe for the same reason.
+    {
+        Module m;
+        m.functions = {fn("__main__", {}, {I(Op::ConstFloat, 0, {}, "", 3.5),
+                                           I(Op::Call, none, {0}, "print"), I(Op::Return, none)})};
+        expect("float print is native-safe", m, true);
     }
 
     // helper(x) is called from __main__ with an int, so x is provably int.

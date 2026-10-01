@@ -1,5 +1,6 @@
 #include "interpreter.h"
 #include "runtime/value.h"
+#include "jit/float_runtime.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -47,6 +48,13 @@ LithonValue apply_binop(Op op, LithonValue lhs, LithonValue rhs) {
     if (op == Op::Div) {
         double a = lhs.is_float() ? lhs.as_float() : static_cast<double>(lhs.as_int());
         double b = rhs.is_float() ? rhs.as_float() : static_cast<double>(rhs.as_int());
+        // Python raises ZeroDivisionError for any zero divisor, including
+        // floats and -0.0, rather than producing inf/nan the way raw IEEE
+        // hardware division does. The JIT's Div emits a comisd check for the
+        // same condition, so the two engines agree here by construction --
+        // which is what lets run_tier_diff.py treat the interpreter as an
+        // oracle for float code at all.
+        if (b == 0.0) throw std::runtime_error("interpreter: division by zero");
         return LithonValue::make_float(a / b);
     }
 
@@ -101,12 +109,22 @@ void do_print(LithonValue v) {
     if (v.is_bool())        std::cout << (v.as_bool() ? "True" : "False") << "\n";
     else if (v.is_int())    std::cout << v.as_int() << "\n";
     else if (v.is_float()) {
-        double f = v.as_float();
-        if (f == static_cast<int64_t>(f)) {
-            std::cout << static_cast<int64_t>(f) << ".0\n";
-        } else {
-            std::cout << f << "\n";
-        }
+        // Deliberately the SAME function the JIT's emitted code calls, not
+        // std::cout. Two reasons, and the second is the important one:
+        //
+        //   1. Correctness. `std::cout << double` defaults to 6 significant
+        //      digits and prints "0.333333" for 1/3 and "1" for
+        //      1.0000000000000002. CPython's repr is the shortest string
+        //      that round-trips, so it prints "0.3333333333333333" and
+        //      "1.0000000000000002". The interpreter is used as the oracle
+        //      for float code, so a lossy default here would make correct
+        //      JIT output look like a JIT bug.
+        //   2. The whole point of the tiered engine is that both tiers
+        //      produce byte-identical stdout. Sharing one formatter makes
+        //      that structural instead of a coincidence to be maintained,
+        //      and it keeps signed zero and the sign of NaN (which the
+        //      stream operator also disagrees with CPython about) in step.
+        std::cout << lithon::jit::host_format_double(v.as_float()) << "\n";
     }
     else throw std::runtime_error("interpreter: print() of an unsupported value kind in this slice");
 }

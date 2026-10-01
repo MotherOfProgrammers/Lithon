@@ -2,7 +2,11 @@
 import argparse
 import sys
 
-from . import LithonError, __version__, compile as compile_file, run
+# Absolute, not relative: pyproject installs cli/init/main as flat top-level
+# py-modules, so `cli` is not part of a package and has no parent to be
+# relative to. The implementation lives in init.py, which is a duplicate of
+# __init__.py with _ROOT resolving to the repo root rather than its parent.
+from init import LithonError, __version__, compile as compile_file, run
 
 
 def main(argv=None) -> int:

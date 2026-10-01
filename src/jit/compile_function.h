@@ -3,12 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "float_runtime.h"
 #include "ir/ir.h"
 #include "jit_abi.h"
 #include "liveness.h"
@@ -57,10 +59,6 @@
 // which has no guard) instead of silently mis-printing a float as a
 // truncated integer.
 //
-// KNOWN, DOCUMENTED LIMITATION: floats have no arithmetic or storage
-// support in the JIT at all yet (no SSE codegen) -- this pass only added
-// correct *printing* of the bool case, not general float support.
-
 namespace lithon::jit {
 
 namespace {
@@ -70,6 +68,15 @@ static const char kIntPrintFormat[] = "%lld\n";
 // with no '%' as a literal, and it saves marshalling a second argument.
 static const char kBoolTrueLiteral[] = "True\n";
 static const char kBoolFalseLiteral[] = "False\n";
+// A double is printed by handing printf a pre-formatted string, NOT with
+// "%f": CPython renders a float with repr(), which is the shortest decimal
+// string that round-trips, so 3.5 prints as "3.5" and 7.0 as "7.0". "%f"
+// would print "3.500000" and "7.000000", and since run_tier_diff.py diffs
+// stdout against the interpreter byte-for-byte, that mismatch would be
+// reported as a JIT bug on every single float. format_double() below
+// produces CPython's exact text, so the format string carries no specifier
+// and can be passed as printf's sole argument like the bool case.
+static const char kFloatPrintFormat[] = "%s\n";
 }
 
 struct CompileOptions {
@@ -96,6 +103,13 @@ struct CompileOptions {
 struct CompiledModule {
     std::vector<uint8_t> code;
     std::unordered_map<std::string, size_t> function_offset;
+    // Raw double bits of every ConstFloat that survived to codegen,
+    // appended after the last function so it sits inside the same
+    // executable mapping. x86-64 has no "mov xmm, imm64", so a double
+    // literal is only ever reachable as a load from memory; the pool IS
+    // that memory. Empty for every module with no float constants,
+    // which is all pre-float code.
+    std::vector<uint64_t> float_pool;
 };
 
 namespace detail {
@@ -104,6 +118,12 @@ struct TempInfo {
     enum class Kind : uint8_t { Normal, Const, Alias, FusedCmp, FusedStore };
     Kind kind = Kind::Normal;
     int64_t imm = 0;
+    // The double this temp folds to, when kind == Const and the value is a
+    // float. The int `imm` above cannot hold one: a double needs all 64 bits
+    // of significand and exponent, which an int64_t would round. A Const temp
+    // with dbl set is a float constant that plan_function recorded; the
+    // "Const" case in load_float_value reads exactly this.
+    double dbl = 0.0;
     Reg alias = Reg::RAX;
 };
 
@@ -141,6 +161,16 @@ inline FunctionPlan plan_function(const lithon::ir::Function& fn, const Promotio
             if (in.op == Op::ConstInt || in.op == Op::ConstBool) {
                 // Both store their value in int_imm (ir.h / text_parser.cpp).
                 TempInfo ti; ti.kind = TempInfo::Kind::Const; ti.imm = in.int_imm;
+                set(in.result, ti);
+                continue;
+            }
+
+            if (in.op == Op::ConstFloat) {
+                // Same virtual-temp treatment as an integer constant: the
+                // double is re-emitted as a pool load at each use rather than
+                // occupying a register. The value lives in `dbl` because
+                // float_imm cannot be squeezed into int_imm without rounding.
+                TempInfo ti; ti.kind = TempInfo::Kind::Const; ti.dbl = in.float_imm;
                 set(in.result, ti);
                 continue;
             }
@@ -344,6 +374,28 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
     };
     std::vector<PendingCallPatch> pending_calls;
 
+    // The double constant pool, shared by every function in the module
+    // and appended once at the very end. Sharing matters: `0.5` in three
+    // different functions is one 8-byte entry, and the dedup is by exact
+    // bit pattern so 0.0 and -0.0 stay distinct as IEEE requires.
+    std::vector<uint64_t> float_pool;
+    std::unordered_map<uint64_t, size_t> float_pool_index_;
+    // A reference to a pool entry whose disp32 cannot be resolved until
+    // the pool's final position is known, since it is RIP-relative.
+    struct PendingFloatPoolRef {
+        size_t disp_offset;   // where the disp32 itself starts in `code`
+        size_t pool_index;    // which entry of float_pool it wants
+    };
+    std::vector<PendingFloatPoolRef> pending_float_pool_refs;
+
+    // One source of truth for "this value is a double": the same Kind
+    // lattice that gates print(). Codegen and the gate therefore cannot
+    // disagree about which values are floats, which is the property that
+    // makes it safe to enable the float path from the guard alone.
+    auto is_float_value = [](const std::vector<Kind>& kinds, lithon::ir::ValueId id) {
+        return id < kinds.size() && kinds[id] == Kind::Float;
+    };
+
     // Computed once, on the ORIGINAL (pre-optimization) module: see the
     // "print() FORMATTING" note above the class comment block for why
     // this stays valid after each function's private copy is folded/DCE'd.
@@ -372,10 +424,40 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         }
 
         PromotionMap promoted = options.promote_registers ? select_promoted_variables(fn)
-                                                          : PromotionMap{};
+                                                           : PromotionMap{};
+
+        // A promoted variable lives in a general-purpose register, which
+        // cannot hold a double. select_promoted_variables is float-blind --
+        // it ranks purely by load/store count -- so any variable that ever
+        // holds a float is dropped from the promotion set here, before
+        // planning, so that:
+        //   * plan_function never marks a load of it an Alias (that is what
+        //     produced "float value aliases a general-purpose register"), and
+        //   * assign_variable_slots gives it a frame slot, which is where the
+        //     float load/store path above expects to find it.
+        // This is the one place the float and integer register worlds meet,
+        // and it is a subtraction, not an addition: the GP machinery is
+        // untouched.
+        for (size_t b = 0; b < fn.blocks.size(); ++b) {
+            for (const auto& in : fn.blocks[b].instrs) {
+                if (in.op == Op::Store && !in.args.empty() &&
+                    is_float_value(value_kinds, in.args.at(0))) {
+                    promoted.erase(in.name);
+                } else if (in.op == Op::Load && is_float_value(value_kinds, in.result)) {
+                    promoted.erase(in.name);
+                }
+            }
+        }
         detail::FunctionPlan plan = detail::plan_function(fn, promoted);
+        // Every value the guard proved is a double, in one list. Handing the
+        // allocator that list -- rather than letting it re-derive kinds --
+        // is what keeps allocation and codegen reading the same lattice.
+        std::vector<ValueId> float_values;
+        for (ValueId id = 0; id < value_kinds.size(); ++id) {
+            if (value_kinds[id] == Kind::Float) float_values.push_back(id);
+        }
         RegisterAllocator alloc(fn, promoted, plan.virtual_temps,
-                                options.borrow_callee_saved);
+                                options.borrow_callee_saved, float_values);
 
         constexpr Reg kL = abi::kScratchLeft;
         constexpr Reg kR = abi::kScratchRight;
@@ -447,6 +529,282 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
             }
         };
 
+        // Emits a call to the host handler that reports a runtime error the
+        // way the interpreter's exception does, so a JIT program and an
+        // interpreted one report the same failure on stderr. Declared before
+        // the float helpers because emit_float_arith uses it.
+        //
+        // The handler must not return: it exits the process, exactly as an
+        // uncaught std::runtime_error would at the top of hello/tier_runner.
+        // Returning would fall through into whatever instruction follows the
+        // call and execute garbage.
+        auto emit_float_zero_division_trap = [&]() {
+            // Spelled exactly as the interpreter spells it, prefix included:
+            // the interpreter throws runtime_error("interpreter: division by
+            // zero") and hello.cpp/tier_runner print "error: " + what(), so
+            // the interpreter's stderr line is "error: interpreter: division
+            // by zero". run_tier_diff.py compares stderr, so anything less
+            // than an exact match here is a diff.
+            constexpr const char* kZeroDivisionMessage =
+                "error: interpreter: division by zero\n";
+            emit_mov_reg_imm(code, abi::kArgRegs[0],
+                             reinterpret_cast<int64_t>(kZeroDivisionMessage));
+            emit_mov_reg_imm(code, kR, reinterpret_cast<int64_t>(&host_report_error));
+            emit_xor_zero(code, Reg::RAX);
+            if (abi::kShadowSpace) emit_sub_rsp_imm32(code, abi::kShadowSpace);
+            emit_call_reg(code, kR);
+            if (abi::kShadowSpace) emit_add_rsp_imm32(code, abi::kShadowSpace);
+        };
+
+        // ---- float (SSE2) helpers ---------------------------------------
+        //
+        // Every one of these works in XMM registers and never touches the GP
+        // pools, so the integer machinery above is untouched by their
+        // existence. The XMM scratch register is a single reserved register
+        // (abi::kScratchFloat) rather than two like r10/r11, because each SSE
+        // op here is strictly two-operand and its own destination: there is
+        // never a moment where two unrelated XMM values must both be live in
+        // scratch.
+
+        // Where the result of a float op should be written, honouring the
+        // FusedStore optimization: if the very next instruction stores this
+        // value into a variable, write straight to the variable's slot and
+        // skip the intermediate entirely.
+        auto float_dest = [&](ValueId id) -> Xmm {
+            if (info_of(id).kind == TempInfo::Kind::FusedStore) return abi::kScratchFloat;
+            return alloc.float_in_register(id) ? alloc.float_register(id) : abi::kScratchFloat;
+        };
+
+        // Write a computed double back to where its value lives. A no-op in
+        // every case except one: a Normal temp that the allocator decided to
+        // spill. A Const temp is virtual (re-materialized as a pool load at
+        // each use, so it has no home at all), a FusedStore/FusedCmp temp is
+        // consumed by the very next instruction, and an in-register temp is
+        // already in place. Calling emit_store here for any of those would
+        // store a general-purpose register into a slot that was never
+        // allocated -- slot 0, which is the return address.
+        auto commit_float_result = [&](ValueId id, Xmm d) {
+            if (info_of(id).kind != TempInfo::Kind::Normal) return;
+            if (alloc.float_in_register(id)) return;
+            if (!alloc.is_float(id)) return;   // virtual temp: no location to write
+            emit_movsd_rbp_mem(code, d, alloc.float_stack_slot(id));
+        };
+
+        // A float VARIABLE lives in its own frame slot as raw double bits. A
+        // promoted variable is a GP register, which cannot hold a double, so
+        // float variables are never promoted -- select_promoted_variables is
+        // float-blind, so this must be enforced here rather than assumed.
+        auto float_var_offset = [&](const std::string& name) {
+            if (!alloc.has_variable(name)) {
+                throw std::runtime_error(
+                    "compile_module: load/store of undeclared variable '" + name + "'");
+            }
+            return alloc.variable_offset(name);
+        };
+
+        auto load_float_var = [&](Xmm dst, const std::string& name) {
+            // Encoded as a movsd from [rbp+disp32]; the GP emitters above use
+            // a dedicated rbp-relative form, and this is its XMM counterpart.
+            emit_movsd_xmm_rbp(code, dst, float_var_offset(name));
+        };
+
+        auto store_float_var = [&](Xmm src, const std::string& name) {
+            emit_movsd_rbp_mem(code, src, float_var_offset(name));
+        };
+
+
+
+        // Emit `movsd dst, [rip+pool_entry]`, deferring the displacement
+        // until the pool is placed. Records the disp32 offset for the
+        // post-pass at the end of compile_module.
+        auto emit_load_pool_double = [&](Xmm dst, uint64_t bits) {
+            size_t index;
+            auto it = float_pool_index_.find(bits);
+            if (it != float_pool_index_.end()) {
+                index = it->second;
+            } else {
+                index = float_pool.size();
+                float_pool.push_back(bits);
+                float_pool_index_[bits] = index;
+            }
+            emit_movsd_xmm_rip(code, dst);
+            pending_float_pool_refs.push_back({movsd_rip_disp_offset(code), index});
+        };
+
+        // Materialize a float value into dst, whatever it currently lives in.
+        auto load_float_value = [&](Xmm dst, ValueId id) {
+            const TempInfo& ti = info_of(id);
+            if (ti.kind == TempInfo::Kind::Const) {
+                uint64_t bits;
+                std::memcpy(&bits, &ti.dbl, sizeof(bits));
+                emit_load_pool_double(dst, bits);
+                return;
+            }
+            if (ti.kind == TempInfo::Kind::Alias) {
+                // A float alias would name a promoted GP register, which
+                // cannot hold a double. Aliasing is only ever assigned to
+                // int/bool temps, so reaching here means the print guard and
+                // the planner disagree -- refuse rather than reinterpret bits.
+                throw std::runtime_error(
+                    "compile_module: float value aliases a general-purpose register");
+            }
+            if (alloc.float_in_register(id)) {
+                Xmm src = alloc.float_register(id);
+                if (src != dst) emit_movsd_xmm_xmm(code, dst, src);
+            } else {
+                emit_movsd_xmm_rbp(code, dst, alloc.float_stack_slot(id));
+            }
+        };
+
+        auto read_float = [&](ValueId id) -> Xmm {
+            if (info_of(id).kind == TempInfo::Kind::Normal && alloc.float_in_register(id)) {
+                return alloc.float_register(id);
+            }
+            load_float_value(abi::kScratchFloat, id);
+            return abi::kScratchFloat;
+        };
+
+        // A ConstFloat is planned as a virtual temp (like ConstInt), so it is
+        // re-materialized as a pool load at every use and never needs a
+        // location of its own. This exists to make that explicit at the
+        // definition site: emitting nothing here is correct, and anything else
+        // would be a wasted register or slot for a value with no run-time
+        // identity.
+        auto load_float_const = [&](ValueId /*id*/, double /*d*/) {};
+
+        // Coerce an int operand to double, because the guard's arith() rule
+        // promotes int+float to Float. Without this, addsd would consume the
+        // bit pattern of an integer and produce nonsense.
+        auto coerce_to_float = [&](Xmm dst, ValueId id) {
+            if (is_float_value(value_kinds, id)) { load_float_value(dst, id); return; }
+            Reg gp = read_left(id);   // int source
+            emit_cvtsi2sd(code, dst, gp);
+        };
+
+        // Emits Add/Sub/Mul/Div for a float result.
+        //
+        // Register discipline, which is the whole difficulty: kScratchFloat
+        // and kScratchFloatB are reserved and never allocated, so there are
+        // always two free XMM registers to stage operands in, and `dst` is
+        // either a value's own pool register or kScratchFloat. The two
+        // scratch registers are never a value's home, so nothing here can
+        // destroy a value another instruction still needs.
+        auto emit_float_arith = [&](const Instr& in) {
+            const Xmm lhs_r = abi::kScratchFloat;
+            const Xmm rhs_r = abi::kScratchFloatB;
+            Xmm dst = float_dest(in.result);
+
+            // Both operands are staged in scratch BEFORE dst is written, so
+            // dst (which may be a value's own register) can never clobber an
+            // operand mid-computation. Loads cannot disturb dst because dst is
+            // not used until the last two instructions.
+            coerce_to_float(lhs_r, in.args.at(0));
+            coerce_to_float(rhs_r, in.args.at(1));
+
+            if (in.op == Op::Div) {
+                // Python raises ZeroDivisionError for any zero divisor, so the
+                // JIT checks and calls the same host handler the interpreter
+                // ends up in.
+                //
+                // A NaN divisor must NOT trap: Python propagates nan
+                // (1.0/nan is nan, not an error). That case cannot be handled
+                // by branching on a single condition, because comisd sets ZF,
+                // PF and CF all at once when the operands are unordered. ZF
+                // alone cannot separate "equal" from "unordered" -- both set
+                // it -- and Cond::NotEqual therefore does NOT skip the trap
+                // for a NaN divisor, it takes it. (Branching on Parity would
+                // disambiguate, but 0F 9A is a byte-for-byte collision between
+                // `jp rel32` and `setp r/m8`; see emit_float_compare.)
+                //
+                // So the zero test is materialized in a GP register instead,
+                // the same setcc-and-not-parity shape the comparison uses:
+                //   kL = ZF (equal OR unordered)  AND  !PF (ordered)
+                // which is 1 exactly when the divisor is an ordered zero.
+                // -0.0 compares equal to 0.0, so it traps too, matching the
+                // interpreter's `b == 0.0`.
+                constexpr Reg kL = abi::kScratchLeft;
+                constexpr Reg kR = abi::kScratchRight;
+                emit_xorpd_zero(code, abi::kScratchFloatZero);
+                emit_comisd(code, rhs_r, abi::kScratchFloatZero);
+                emit_setcc(code, Cond::Equal, kL);
+                emit_movzx_reg_reg8(code, kL, kL);
+                emit_setcc(code, Cond::NotParity, kR);
+                emit_movzx_reg_reg8(code, kR, kR);
+                emit_and_reg_reg(code, kL, kR);
+                emit_test_reg_reg(code, kL);
+                // test sets ZF iff kL == 0, and Cond::Equal reads ZF, so this
+                // jumps OVER the trap exactly when the divisor is not an
+                // ordered zero. A NaN divisor leaves kL clear (PF forced
+                // !PF to 0) and therefore propagates instead of trapping.
+                JumpPatch skip_trap = emit_jcc_rel32(code, Cond::Equal);
+                emit_float_zero_division_trap();
+                resolve_jump_patch(code, skip_trap, code.size());
+            }
+
+            if (dst != lhs_r) emit_movsd_xmm_xmm(code, dst, lhs_r);
+            if (in.op == Op::Add) emit_addsd(code, dst, rhs_r);
+            else if (in.op == Op::Sub) emit_subsd(code, dst, rhs_r);
+            else if (in.op == Op::Mul) emit_mulsd(code, dst, rhs_r);
+            else emit_divsd(code, dst, rhs_r);
+            commit_float_result(in.result, dst);
+        };
+
+        // Lt/Gt/Eq with at least one double operand. The result is a Bool,
+        // so it lives in a general-purpose register; only the comparison
+        // itself is floating point.
+        //
+        // Flag semantics: ucomisd sets CF like an unsigned compare, so
+        //   lhs <  rhs  ->  CF set                (Cond::Below)
+        //   lhs >  rhs  ->  CF clear and ZF clear (Cond::Above)
+        //   lhs == rhs  ->  ZF set, and NOT unordered
+        // An unordered compare (either operand NaN) sets ZF, PF and CF all
+        // at once, which is deliberately ambiguous: it makes the "less
+        // than" reading true, the "equal" reading true, and the "greater
+        // than" reading false. Every ordered operator therefore has to
+        // exclude the unordered case, or NaN would compare as less than
+        // everything. Python agrees: 1.0 < nan, 1.0 > nan and 1.0 == nan
+        // are all False.
+        //
+        // That exclusion is done with setcc + and rather than a parity
+        // branch. Branching on Parity would be the obvious encoding, but
+        // 0F 9A is a byte-for-byte collision between `jp rel32` and
+        // `setp r/m8` -- the CPU picks between them by looking at the
+        // ModRM byte that follows, and a rel32 displacement that looks
+        // like a non-register ModRM (mod=00, rm=101 gives 0x0d, which a
+        // small forward displacement very often does) makes the CPU
+        // execute a store to a wild address instead of a branch. So:
+        //   dst = <the flag test>  AND  <not unordered>
+        // Two setcc, one and, no branches, and the disassembly is exact.
+        auto emit_float_compare = [&](const Instr& in) {
+            const Xmm lhs_r = abi::kScratchFloat;
+            const Xmm rhs_r = abi::kScratchFloatB;
+            coerce_to_float(lhs_r, in.args.at(0));
+            coerce_to_float(rhs_r, in.args.at(1));
+            Reg dst = compute_dest(in.result);
+            // The operands are already in XMM registers, so kL is free as a
+            // bit to compute the "not unordered" flag in.
+            constexpr Reg kL = abi::kScratchLeft;
+
+            if (in.op == Op::Gt) {
+                // ucomisd dst, src reads flags for src < dst, so comparing
+                // with the operands swapped turns Cond::Below into lhs > rhs.
+                emit_ucomisd(code, rhs_r, lhs_r);
+            } else {
+                emit_ucomisd(code, lhs_r, rhs_r);
+            }
+
+            // Eq tests ZF; Lt and Gt both test CF, since Gt swapped its
+            // operands above.
+            emit_setcc(code, in.op == Op::Eq ? Cond::Equal : Cond::Below, dst);
+            emit_movzx_reg_reg8(code, dst, dst);
+            // setnp (not parity) is 1 exactly when the compare was ordered,
+            // which is what keeps every NaN comparison False.
+            emit_setcc(code, Cond::NotParity, kL);
+            emit_movzx_reg_reg8(code, kL, kL);
+            emit_and_reg_reg(code, dst, kL);
+            commit_result(in.result, dst);
+        };
+
         // ---- prologue ---------------------------------------------------
         emit_prologue(code, alloc.frame_size());
         for (const auto& saved : alloc.callee_saved_slots()) {
@@ -508,37 +866,68 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                 const Instr& instr = block.instrs[pos];
 
                 switch (instr.op) {
-                    case Op::ConstInt:
-                    case Op::ConstBool:
-                        break;   // always an immediate at its uses
+            case Op::ConstInt:
+            case Op::ConstBool:
+                break;   // always an immediate at its uses
 
-                    case Op::Load: {
-                        if (info_of(instr.result).kind == TempInfo::Kind::Alias) break;
-                        require_variable(instr.name, "load of");
-                        Reg dst = compute_dest(instr.result);
-                        if (alloc.variable_in_register(instr.name)) {
-                            emit_mov_reg_reg(code, dst, alloc.variable_reg(instr.name));
-                        } else {
-                            emit_load_rbp_offset(code, dst, alloc.variable_offset(instr.name));
-                        }
-                        commit_result(instr.result, dst);
-                        break;
-                    }
+            case Op::ConstFloat:
+                // A double is not an immediate operand in x86-64; it lives in
+                // the constant pool appended after the code and is loaded with
+                // one movsd at each use. This is the SSE analogue of the
+                // "always an immediate at its uses" above, and it is why
+                // ConstFloat must be plannable as a Const temp: otherwise a
+                // load would have to be re-materialized at every use, which is
+                // what the immediate path avoids for ints.
+                if (info_of(instr.result).kind == TempInfo::Kind::Normal) {
+                    load_float_const(instr.result, instr.float_imm);
+                }
+                break;
 
-                    case Op::Store: {
-                        require_variable(instr.name, "store to");
-                        if (alloc.variable_in_register(instr.name)) {
-                            materialize_into(alloc.variable_reg(instr.name), instr.args.at(0));
-                        } else {
-                            Reg src = read_left(instr.args.at(0));
-                            emit_store_rbp_offset(code, src, alloc.variable_offset(instr.name));
-                        }
-                        break;
-                    }
+            case Op::Load: {
+                if (info_of(instr.result).kind == TempInfo::Kind::Alias) break;
+                require_variable(instr.name, "load of");
+                if (is_float_value(value_kinds, instr.result)) {
+                    Xmm dst = float_dest(instr.result);
+                    load_float_var(dst, instr.name);
+                    commit_float_result(instr.result, dst);
+                    break;
+                }
+                Reg dst = compute_dest(instr.result);
+                if (alloc.variable_in_register(instr.name)) {
+                    emit_mov_reg_reg(code, dst, alloc.variable_reg(instr.name));
+                } else {
+                    emit_load_rbp_offset(code, dst, alloc.variable_offset(instr.name));
+                }
+                commit_result(instr.result, dst);
+                break;
+            }
 
-                    case Op::Add:
-                    case Op::Sub:
-                    case Op::Mul: {
+            case Op::Store: {
+                require_variable(instr.name, "store to");
+                if (is_float_value(value_kinds, instr.args.at(0))) {
+                    Xmm src = read_float(instr.args.at(0));
+                    store_float_var(src, instr.name);
+                    break;
+                }
+                if (alloc.variable_in_register(instr.name)) {
+                    materialize_into(alloc.variable_reg(instr.name), instr.args.at(0));
+                } else {
+                    Reg src = read_left(instr.args.at(0));
+                    emit_store_rbp_offset(code, src, alloc.variable_offset(instr.name));
+                }
+                break;
+            }
+
+            case Op::Add:
+            case Op::Sub:
+            case Op::Mul:
+            case Op::Div: {
+                // The float path is a separate case body rather than extra
+                // branches inside the integer one: an int temp and a double
+                // temp are different storage, so mixing them in one block
+                // would mean every register name in it is conditionally a GP
+                // register or an XMM one.
+                if (is_float_value(value_kinds, instr.result)) { emit_float_arith(instr); break; }
                         const bool fused = info_of(instr.result).kind == TempInfo::Kind::FusedStore;
                         Reg dst = fused ? alloc.variable_reg(block.instrs[pos + 1].name)
                                         : compute_dest(instr.result);
@@ -580,6 +969,15 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                     case Op::Gt:
                     case Op::Eq: {
                         if (info_of(instr.result).kind == TempInfo::Kind::FusedCmp) break;
+                        // A float operand means the whole comparison is a
+                        // double comparison -- the guard promotes int+float
+                        // -- so it cannot go through the integer cmp/setcc
+                        // path, which would read the bit pattern.
+                        if (is_float_value(value_kinds, instr.args.at(0)) ||
+                            is_float_value(value_kinds, instr.args.at(1))) {
+                            emit_float_compare(instr);
+                            break;
+                        }
                         Reg lhs = read_left(instr.args.at(0));
                         Reg dst = compute_dest(instr.result);
                         int32_t imm = 0;
@@ -698,7 +1096,35 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                             ValueId arg = instr.args.at(0);
                             Kind k = arg < value_kinds.size() ? value_kinds[arg] : Kind::Unknown;
 
-                            if (k == Kind::Bool) {
+                            if (k == Kind::Float) {
+                                // Two calls, because printf has no format that
+                                // reproduces CPython's shortest-roundtrip
+                                // rendering. First format the double in the host
+                                // (see float_runtime.h), then print the
+                                // resulting string with "%s".
+                                //
+                                // The double is a variadic float argument, so it
+                                // goes in the first XMM register rather than a GP
+                                // one, and AL must be nonzero: SysV reads it as
+                                // the count of vector registers used, and the
+                                // xor_zero on the int/bool path sets 0, which
+                                // would make the callee skip XMM0 outright.
+                                Xmm fv = read_float(arg);
+                                if (fv != abi::kFloatArgReg) {
+                                    emit_movsd_xmm_xmm(code, abi::kFloatArgReg, fv);
+                                }
+                                emit_mov_reg_imm(code, kR,
+                                                 reinterpret_cast<int64_t>(&host_format_double));
+                                emit_xor_zero(code, Reg::RAX);
+                                if (abi::kShadowSpace) emit_sub_rsp_imm32(code, abi::kShadowSpace);
+                                emit_call_reg(code, kR);
+                                if (abi::kShadowSpace) emit_add_rsp_imm32(code, abi::kShadowSpace);
+                                // Returns a char* in RAX; hand it to printf as
+                                // the second argument.
+                                emit_mov_reg_reg(code, abi::kArgRegs[1], Reg::RAX);
+                                emit_mov_reg_imm(code, abi::kArgRegs[0],
+                                                 reinterpret_cast<int64_t>(kFloatPrintFormat));
+                            } else if (k == Kind::Bool) {
                                 // Two literal strings, no format specifiers: select
                                 // which one is printf's sole argument by branching,
                                 // rather than formatting a "%s" indirection.
@@ -717,19 +1143,25 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                                 emit_mov_reg_imm(code, abi::kArgRegs[0],
                                     reinterpret_cast<int64_t>(kIntPrintFormat));
                             } else {
-                                // Float or an unresolved/mixed kind: the JIT has no
-                                // float codegen and no other format to fall back to.
-                                // A caller with the print_guard in front of it (the
-                                // tier_runner) never reaches this; a caller without
-                                // one (lithon_jit) gets a clear refusal instead of a
-                                // silently-wrong integer reinterpretation.
+                                // Unresolved or mixed kind -- not float, which is
+                                // handled above. There is no format to fall back to
+                                // and no way to tell whether the value is even a
+                                // number. A caller with the print_guard in front of
+                                // it (tier_runner) never reaches this; a caller
+                                // without one (lithon_jit) gets a clear refusal
+                                // instead of a silently-wrong integer
+                                // reinterpretation of a double.
                                 throw std::runtime_error(
                                     "compile_module: print() argument is not provably "
-                                    "int or bool (kind: " + std::string(kind_name(k)) +
-                                    "); native float printing is not implemented");
+                                    "int, bool or float (kind: " + std::string(kind_name(k)) +
+                                    "); native cannot choose a format for it");
                             }
                             emit_mov_reg_imm(code, kR, reinterpret_cast<int64_t>(&std::printf));
-                            emit_xor_zero(code, Reg::RAX);   // al = 0 vector regs (SysV variadic)
+                            // The float branch above already made its own call and
+                            // left the string pointer in the second argument
+                            // register, so AL is 0 here for every kind: printf's
+                            // only argument is now a pointer, never a double.
+                            emit_xor_zero(code, Reg::RAX);
                             if (abi::kShadowSpace) emit_sub_rsp_imm32(code, abi::kShadowSpace);
                             emit_call_reg(code, kR);
                             if (abi::kShadowSpace) emit_add_rsp_imm32(code, abi::kShadowSpace);
@@ -922,7 +1354,33 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         resolve_jump_patch(code, p.patch, it->second);
     }
 
-    return CompiledModule{std::move(code), std::move(function_offset)};
+    // Append the double constant pool to the code and resolve every
+    // pending RIP-relative reference to it. Each pending site recorded
+    // the offset of its own disp32 and the pool index it wants; now that
+    // the pool's base offset in the buffer is known, every one of them
+    // becomes a concrete rel32 and the code is position-independent
+    // within the mapping.
+    for (const auto& site : pending_float_pool_refs) {
+        const size_t pool_base = code.size();
+        // RIP-relative displacement is measured from the END of the
+        // instruction, which is exactly where patch_u32_at expects to
+        // write: site.disp_offset is the disp32's own position, and the
+        // four bytes after it are the end of the movsd.
+        const int64_t rel = static_cast<int64_t>(pool_base + site.pool_index * 8) -
+                            static_cast<int64_t>(site.disp_offset + 4);
+        if (rel < INT32_MIN || rel > INT32_MAX) {
+            throw std::runtime_error(
+                "compile_module: float constant pool is out of reach");
+        }
+        patch_u32_at(code, site.disp_offset, static_cast<uint32_t>(rel));
+    }
+    for (uint64_t bits : float_pool) {
+        for (int i = 0; i < 8; ++i) {
+            code.push_back(static_cast<uint8_t>((bits >> (8 * i)) & 0xFF));
+        }
+    }
+
+    return CompiledModule{std::move(code), std::move(function_offset), std::move(float_pool)};
 }
 
 } // namespace lithon::jit

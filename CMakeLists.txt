@@ -74,6 +74,24 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|X86_64)$")
     target_include_directories(optimize_lsr_test PUBLIC src src/jit)
     add_test(NAME optimize_lsr_test COMMAND optimize_lsr_test)
 
+    # host_format_double is the single function both the JIT (called by
+    # emitted code) and the interpreter use to render a double, so it is the
+    # one place where CPython's repr rules can be pinned directly. The
+    # expectations below are CPython's, transcribed by hand -- not generated
+    # from this code, which is the whole point of the test.
+    add_executable(float_format_test src/jit/float_format_test.cpp)
+    target_include_directories(float_format_test PUBLIC src src/jit)
+    add_test(NAME float_format_test COMMAND float_format_test)
+
+    # Needs real machine code to be executed, so this is POSIX-only (fork +
+    # waitpid) and does not build on Windows. The div-by-zero trap calls
+    # exit(1), which is why one case runs in a child process.
+    if(NOT WIN32)
+        add_executable(compile_module_float_test src/jit/compile_module_float_test.cpp)
+        target_include_directories(compile_module_float_test PUBLIC src src/jit)
+        add_test(NAME compile_module_float_test COMMAND compile_module_float_test)
+    endif()
+
     # NOTE: tools/verify_all.sh also builds typecheck_entry_test and
     # interpreter_entry_test, but neither src/typecheck/typecheck_entry_test.cpp
     # nor src/interpreter/interpreter_entry_test.cpp exists in this tree yet --

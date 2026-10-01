@@ -162,6 +162,31 @@ class IRBuilder:
             self.emit(f"{r} = not {operand}")
             return r
 
+        # Unary minus. There is no Neg opcode in the IR, so a negated
+        # *literal* is folded into its constant -- which is the overwhelmingly
+        # common case, since `-1` and `-2.5` reach here as UnaryOp(USub,
+        # Constant) rather than as a negative literal token. Anything else
+        # becomes `0 - x`, which needs no new opcode and lowers to a Sub that
+        # the existing int and float paths already handle (the 0 is promoted
+        # to a double automatically when x is a float).
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            inner = node.operand
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, bool) is False:
+                if isinstance(inner.value, int):
+                    r = self.new_reg()
+                    self.emit(f"{r} = const_i64 {-inner.value}")
+                    return r
+                if isinstance(inner.value, float):
+                    r = self.new_reg()
+                    self.emit(f"{r} = const_f64 {-inner.value!r}")
+                    return r
+            operand = self.build_expr(inner)
+            zero = self.new_reg()
+            self.emit(f"{zero} = const_i64 0")
+            r = self.new_reg()
+            self.emit(f"{r} = sub {zero}, {operand}")
+            return r
+
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
                 raise NotImplementedError("only direct name calls are supported")

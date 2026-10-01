@@ -72,14 +72,22 @@ public:
     // value with no run-time existence is excluded BEFORE ranges are
     // computed, and used again here to leave it unallocated. One set, one
     // source of truth, and the two uses cannot drift apart.
+    //
+    // `float_values` are the ValueIds the caller proved are doubles (via
+    // print_guard's Kind lattice). Empty means "no floats in this
+    // function", which is every pre-float caller, so they keep working
+    // unchanged and pay nothing.
     RegisterAllocator(const lithon::ir::Function& fn, PromotionMap promoted,
-                      const VirtualTemps& virtual_temps, bool borrow = true)
+                      const VirtualTemps& virtual_temps, bool borrow = true,
+                      const std::vector<lithon::ir::ValueId>& float_values = {})
         : fn_(fn), liveness_(fn, virtual_temps), promoted_(std::move(promoted)),
           borrow_(borrow) {
         assign_variable_slots();
         assign_callee_saved_slots();
         find_call_indices();
         assign_temporary_locations(virtual_temps);
+        if (!float_values.empty()) assign_float_locations(float_values, virtual_temps);
+        finalize_frame_size();
     }
 
     int variable_offset(const std::string& name) const {
@@ -125,6 +133,28 @@ public:
         return it != temp_locations_.end() ? it->second : missing;
     }
 
+    // --- float (XMM) allocation, queried only for values the caller
+    // proved are doubles. float_in_register() false means the value
+    // lives in float_temp_slot(); there is no third state.
+    bool is_float(lithon::ir::ValueId id) const {
+        return float_temp_reg_.count(id) || float_spilled_.count(id);
+    }
+
+    bool float_in_register(lithon::ir::ValueId id) const {
+        return float_temp_reg_.count(id) != 0;
+    }
+
+    Xmm float_register(lithon::ir::ValueId id) const {
+        static const Xmm none = Xmm::XMM0;
+        auto it = float_temp_reg_.find(id);
+        return it != float_temp_reg_.end() ? it->second : none;
+    }
+
+    int float_stack_slot(lithon::ir::ValueId id) const {
+        auto it = float_temp_slot_.find(id);
+        return it != float_temp_slot_.end() ? it->second : 0;
+    }
+
     int frame_size() const { return frame_size_; }
 
     const std::vector<std::string>& variable_names_in_order() const {
@@ -145,10 +175,25 @@ private:
     int next_slot_offset_ = 0;
     int frame_size_ = 0;
 
+    // The FP mirror of the GP allocation above. Every value the print
+    // guard proved is a float gets an XMM location here, and a value
+    // that is NOT a float never appears in these maps at all, so the
+    // two worlds cannot collide: a GP register and an XMM register are
+    // different storage, and separate maps make that structural rather
+    // than a convention someone has to remember.
+    std::unordered_map<lithon::ir::ValueId, Xmm> float_temp_reg_;
+    std::unordered_map<lithon::ir::ValueId, int> float_temp_slot_;
+    std::unordered_set<lithon::ir::ValueId> float_spilled_;
+
     int allocate_new_slot() {
         next_slot_offset_ -= 8;
         return next_slot_offset_;
     }
+
+    // Float spills occupy 8 bytes exactly like GP ones, so they share
+    // the one downward-growing frame cursor rather than a second one:
+    // two cursors over the same frame is how slots start overlapping.
+    int allocate_float_slot() { return allocate_new_slot(); }
 
     static bool is_temp_pool_reg(Reg r) {
         for (Reg t : abi::kTempPool) if (t == r) return true;
@@ -242,6 +287,86 @@ private:
         return false;
     }
 
+    // Assign an XMM register or a stack slot to every value `float_values`
+    // proves is a double, reusing the same live-range sweep as the GP
+    // side. Deliberately simpler than assign_temporary_locations: a
+    // float temp is never made to survive a call in a register, because
+    // every register in kFloatTempPool is caller-saved and borrowing a
+    // callee-saved XMM would mean differing between the two host ABIs
+    // (XMM6-15 disagree) for no measured gain. A float live across a
+    // call therefore spills, which is correct and cheap.
+    //
+    // The spilling is not optional: host_format_double is an ordinary C
+    // function, so it clobbers every caller-saved XMM. A float left in
+    // one across a `call print` reads back as whatever the formatter
+    // happened to leave there -- silent data corruption, not a crash.
+    void assign_float_locations(const std::vector<lithon::ir::ValueId>& float_values,
+                                const VirtualTemps& virtual_temps) {
+        std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries;
+        for (lithon::ir::ValueId id : float_values) {
+            auto it = liveness_.ranges().find(id);
+            // A value with no run-time existence (a constant folded away
+            // into its use site) has no range and needs no location.
+            if (it == liveness_.ranges().end()) continue;
+            if (virtual_temps.count(id)) continue;
+            entries.push_back({id, it->second});
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            return a.second.birth != b.second.birth ? a.second.birth < b.second.birth
+                                                    : a.first < b.first;
+        });
+
+        // `free_xmm` tracks which registers are free *right now*, for the
+        // benefit of later entries. It is deliberately NOT the same thing as
+        // float_temp_reg_, which is the permanent record of where each value
+        // lives. Erasing a value from float_temp_reg_ when its live range ends
+        // would be wrong: codegen runs after allocation, and it asks about a
+        // value's location while emitting that value's own definition and its
+        // uses. A value whose range has ended is simply never asked about
+        // again, so the record has to survive. (The GP sweep above keeps
+        // temp_locations_ the same way, and only recycles the register into
+        // free_regs.)
+        std::vector<Xmm> free_xmm(abi::kFloatTempPool.begin(), abi::kFloatTempPool.end());
+        std::vector<std::pair<lithon::ir::ValueId, LiveRange>> active;
+
+        for (const auto& entry : entries) {
+            lithon::ir::ValueId id = entry.first;
+            active.erase(std::remove_if(active.begin(), active.end(), [&](const auto& a) {
+                if (a.second.last_use < entry.second.birth) {
+                    // Recycle the register, but leave float_temp_reg_ and
+                    // float_temp_slot_ alone: those say where the value
+                    // lives, not whether it is still live.
+                    auto it = float_temp_reg_.find(a.first);
+                    if (it != float_temp_reg_.end()) free_xmm.push_back(it->second);
+                    return true;
+                }
+                return false;
+            }), active.end());
+
+            // A value whose range spans a call cannot sit in a
+            // caller-saved XMM across it, so it goes straight to a slot
+            // even when registers are free. (Freeing its register below
+            // still happens on the range-end sweep, so the register is
+            // not leaked into a permanently unusable state.)
+            const bool must_spill = spans_a_call(entry.second);
+            if (!free_xmm.empty() && !must_spill) {
+                Xmm r = *std::min_element(free_xmm.begin(), free_xmm.end(),
+                                          [](Xmm a, Xmm b) {
+                                              return static_cast<uint8_t>(a) < static_cast<uint8_t>(b);
+                                          });
+                free_xmm.erase(std::find(free_xmm.begin(), free_xmm.end(), r));
+                float_temp_reg_[id] = r;
+            } else {
+                // Either every register in the pool is live across this
+                // value's birth, or the value outlives a call. Either way
+                // it needs a stack slot of its own.
+                float_spilled_.insert(id);
+                float_temp_slot_[id] = allocate_float_slot();
+            }
+            active.push_back(entry);
+        }
+    }
+
     void assign_temporary_locations(const VirtualTemps& virtual_temps) {
         std::vector<std::pair<lithon::ir::ValueId, LiveRange>> entries;
         for (const auto& kv : liveness_.ranges()) {
@@ -307,7 +432,13 @@ private:
             }
             active.push_back(entry);
         }
+    }
 
+    // Computed once, after BOTH the GP and float passes have handed out
+    // slots. It has to be last: the float pass allocates from the same
+    // downward cursor, so a frame size computed before it ran would be
+    // too small and the float spills would land outside the frame.
+    void finalize_frame_size() {
         int total_bytes = -next_slot_offset_;
         frame_size_ = ((total_bytes + 15) / 16) * 16;
     }

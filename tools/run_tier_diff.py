@@ -29,7 +29,11 @@ FRONTEND = ROOT / "src" / "frontend" / "frontend.py"
 SUITES = [ROOT / "tests" / "programs", ROOT / "tests" / "typed_regression"]
 
 # name -> (ir_text, expected_tier_for_auto) ; tier is "tier0" or "tier1"
-# Bool-only prints run natively (True/False); float, mixed and unknown prints must fall back.
+# Bool-only prints run natively (True/False). Float and mixed numeric prints
+# run natively too, now that the JIT has XMM arithmetic, float comparison and
+# CPython-compatible float rendering. Only genuinely unknown prints must fall
+# back -- a tier0 expectation here means "the guard is not yet strong enough",
+# so each one is a standing reminder of what is still unsupported.
 ADVERSARIAL = {
     "bool_from_compare": ("""
 function main():
@@ -87,7 +91,7 @@ block0:
     %2 = add %0, %1
     call print, %2
     return
-""", "tier0"),
+""", "tier1"),
     "int_and_or_value_semantics": ("""
 function main():
 block0:

@@ -203,17 +203,20 @@ struct Analysis {
                     case Op::Add: case Op::Sub: case Op::Mul:
                         raise(st.vals[in.result],
                               arith(val(st, in.args.at(0)), val(st, in.args.at(1))));
+                        if (final_pass) check_arith_operands(st, block, in, verdict);
                         break;
                     case Op::Div: {
                         Kind k = arith(val(st, in.args.at(0)), val(st, in.args.at(1)));
                         raise(st.vals[in.result],
                               k == Kind::Unseen ? k
                               : (k == Kind::Unknown ? k : Kind::Float));
+                        if (final_pass) check_arith_operands(st, block, in, verdict);
                         break;
                     }
 
                     case Op::Lt: case Op::Gt: case Op::Eq: case Op::Not:
                         raise(st.vals[in.result], Kind::Bool);
+                        if (final_pass) check_arith_operands(st, block, in, verdict);
                         break;
 
                     case Op::And: case Op::Or:
@@ -267,6 +270,57 @@ struct Analysis {
         }
     }
 
+    // A value whose kind is Unknown cannot be given a storage class by
+    // codegen, which only ever asks `is_float_value` -- and that predicate is
+    // false for Unknown, so an Unknown operand is silently lowered as an
+    // *integer*. That is correct only if it really is an integer.
+    //
+    // It is not, in general. `r = 0.0` then `r = 5` gives r the join
+    // Unknown; a later `s * r` where s is a float is arith(Float, Unknown),
+    // which is also Unknown, so the multiply is emitted as an integer
+    // multiply over a double's raw bit pattern and the result is garbage.
+    // Printing a bool from that comparison hides the problem, because a
+    // comparison always produces Bool and so always passes the print check.
+    //
+    // So the guard has to reject the *producer* of every Unknown value that
+    // feeds arithmetic, not just Unknown values that are printed. This is
+    // the conservative direction: the alternative is for codegen to treat
+    // Unknown as Float, which would break the long-standing behaviour where
+    // an unresolvable value keeps the integer path.
+    //
+    // Only arithmetic and comparison consume a value in a way that needs to
+    // know int-vs-float. load/store/print of an Unknown are already covered
+    // (store of an Unknown is itself a source of Unknown, and print is
+    // checked separately).
+    void check_arith_operands(FnState& st, const lithon::ir::BasicBlock& block,
+                              const lithon::ir::Instr& in, GuardVerdict* verdict) {
+        using lithon::ir::Op;
+        if (in.op != Op::Add && in.op != Op::Sub && in.op != Op::Mul &&
+            in.op != Op::Div && in.op != Op::Lt && in.op != Op::Gt &&
+            in.op != Op::Eq) {
+            return;
+        }
+        std::string where = st.fn->name + "/" + block.label;
+        for (size_t i = 0; i < in.args.size(); ++i) {
+            Kind k = val(st, in.args[i]);
+            if (k == Kind::Unknown) {
+                verdict->native_safe = false;
+                verdict->reasons.push_back(
+                    where + ": operand %" + std::to_string(in.args[i]) +
+                    " of " + (in.op == Op::Div ? "div" :
+                              in.op == Op::Add ? "add" :
+                              in.op == Op::Sub ? "sub" :
+                              in.op == Op::Mul ? "mul" :
+                              in.op == Op::Lt ? "lt" :
+                              in.op == Op::Gt ? "gt" : "eq") +
+                    " is " + kind_name(k) +
+                    "; native cannot choose between the integer and double "
+                    "path for it (a value stored both an int and a float "
+                    "reaches here)");
+            }
+        }
+    }
+
     void check_print(FnState& st, const lithon::ir::BasicBlock& block,
                      const lithon::ir::Instr& in, GuardVerdict* verdict) {
         std::string where = st.fn->name + "/" + block.label;
@@ -277,23 +331,31 @@ struct Analysis {
             return;
         }
         Kind k = val(st, in.args[0]);
-        // Bool is native-safe: the JIT now formats a provably-bool value as
-        // True/False (see compile_function.h), matching the interpreter.
-        // Anything else -- float, or a join of incomparable kinds -- is not.
-        if (k != Kind::Int && k != Kind::Bool) {
+        // Int and Bool are native-safe, and so is Float: the JIT formats a
+        // provably-float value with host_format_double(), which reproduces
+        // CPython's shortest-roundtrip repr, so the bytes match what the
+        // interpreter prints. A join of incomparable kinds is still refused.
+        if (k != Kind::Int && k != Kind::Bool && k != Kind::Float) {
             verdict->native_safe = false;
             verdict->reasons.push_back(where + ": print argument %" +
                 std::to_string(in.args[0]) + " is " + kind_name(k) +
-                "; native print() cannot format it (only int and bool are supported)");
+                "; native print() cannot format it (only int, bool and float are supported)");
         }
     }
 };
 
 }  // namespace detail
 
-// Runs the whole-module analysis to a fixpoint, then checks every
-// reachable print(). Returns native_safe=false with reasons if any
-// printed value is not provably an int.
+// Runs the whole-module analysis to a fixpoint, then checks every reachable
+// print() and every arithmetic/comparison operand. Returns native_safe=false
+// with reasons if anything the emitted code would have to pick an int-vs-float
+// lowering for is not provably one of them.
+//
+// Note that this guards the *whole module*, so it is what tier_runner uses to
+// decide whether a program may fall back to the interpreter. lithon_jit
+// compiles a single function directly and therefore relies on infer_value_kinds
+// alone; a program that check_print_safety refuses is still compilable, it just
+// is not trusted to produce the same bytes as the interpreter.
 inline GuardVerdict check_print_safety(const lithon::ir::Module& module) {
     detail::Analysis an;
     an.init(module);

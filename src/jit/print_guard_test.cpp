@@ -129,15 +129,18 @@ block0:
     return
 )", true);
 
+    // Float is native-safe now: the JIT renders a double with the same
+    // shortest-roundtrip algorithm CPython's repr uses, so the bytes agree
+    // with the interpreter and the guard no longer has to refuse.
     expect("float printed", R"(
 function main():
 block0:
     %0 = const_f64 3.5
     call print, %0
     return
-)", false);
+)", true);
 
-    expect("int / int is a float in the interpreter", R"(
+    expect("int / int is a float, and float is printable", R"(
 function main():
 block0:
     %0 = const_i64 6
@@ -145,7 +148,27 @@ block0:
     %2 = div %0, %1
     call print, %2
     return
-)", false);
+)", true);
+
+    expect("mixed int + float is a float, and float is printable", R"(
+function main():
+block0:
+    %0 = const_i64 10
+    %1 = const_f64 2.5
+    %2 = add %0, %1
+    call print, %2
+    return
+)", true);
+
+    expect("float comparison yields a printable bool", R"(
+function main():
+block0:
+    %0 = const_f64 1.5
+    %1 = const_f64 2.0
+    %2 = lt %0, %1
+    call print, %2
+    return
+)", true);
 
     expect("bool arithmetic is not provably int", R"(
 function main():
@@ -156,6 +179,60 @@ block0:
     call print, %2
     return
 )", false);
+
+    // A variable stored both a float and an int has kind Unknown, and codegen
+    // only asks `is_float_value`, which is false for Unknown -- so it would
+    // lower the multiply below as an INTEGER multiply over a double's raw bit
+    // pattern. Printing the resulting bool hides it, because a comparison is
+    // always Bool and so always passes the print check. This is the exact
+    // shape tools/fuzz_diff.py --floats found (seed 145).
+    expect("int/float variable feeding arithmetic is refused, even when only a bool is printed", R"(
+function main():
+block0:
+    %0 = const_f64 0.0
+    store r, %0
+    %1 = const_i64 5
+    store r, %1
+    %2 = const_f64 -0.0
+    store s, %2
+    %3 = load s
+    %4 = load r
+    %5 = mul %3, %4
+    %6 = load r
+    %7 = gt %5, %6
+    call print, %7
+    return
+)", false);
+
+    // The same Unknown operand reaching a comparison must be refused too, for
+    // the same reason: a float compared as an integer reads bit patterns.
+    expect("int/float variable feeding a comparison is refused", R"(
+function main():
+block0:
+    %0 = const_f64 1.0
+    store r, %0
+    %1 = const_i64 2
+    store r, %1
+    %2 = load r
+    %3 = const_f64 0.5
+    %4 = gt %2, %3
+    call print, %4
+    return
+)", false);
+
+    // An Unknown that never reaches arithmetic is still fine: it is stored and
+    // never read numerically, so nothing has to be lowered.
+    expect("int/float variable that is only stored is not itself a reason to refuse", R"(
+function main():
+block0:
+    %0 = const_f64 0.0
+    store r, %0
+    %1 = const_i64 5
+    store r, %1
+    %2 = const_i64 7
+    call print, %2
+    return
+)", true);
 
     expect("uncalled function with untyped param may get anything", R"(
 function helper(x):
