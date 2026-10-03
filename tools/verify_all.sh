@@ -64,6 +64,13 @@ done
 step "encoder vs GNU as"
 python3 tools/check_encoder_vs_as.py
 
+step "CPU target features: CPUID detection must match the kernel's own view"
+python3 tools/check_cpu_features.py
+
+step "VEX encoding discipline: no legacy SSE opcode after VEX without vzeroupper"
+python3 tools/check_vex_transitions.py --self-test
+python3 tools/check_vex_transitions.py
+
 step "frontend"
 if [[ -f tools/test_frontend_entry.py ]]; then
     python3 tools/test_frontend_entry.py
@@ -81,7 +88,24 @@ python3 tools/run_tier_diff.py
 step "differential fuzzing: interpreter vs JIT on random typed programs"
 python3 tools/fuzz_diff.py --count 300
 
+step "differential fuzzing: bitwise/shift programs (both encodings, count bounds, RCX destination)"
+python3 tools/fuzz_diff.py --count 200 --bitwise
+
+# The only programs whose *correctness* depends on the SSA pipeline are the
+# ones with a merge, so this runs the merge-focused generator with and without
+# --ssa and requires both to match the interpreter. A green --bitwise run says
+# nothing about Mem2Reg, Phi placement or copy resolution.
+step "differential fuzzing: conditional-expression merges through the SSA pipeline"
+python3 tools/fuzz_diff.py --count 200 --phi
+python3 tools/fuzz_diff.py --count 200 --phi --floats
+# Accumulator unrolling reorders blocks (the jammed main loop is emitted after
+# the remainder), so it exercises a different liveness regime than anything else
+# here. It is off by default in production, which is exactly why it needs its
+# own run rather than riding along with the others.
+python3 tools/fuzz_diff.py --count 200 --accum
+
 step "x64 ABI: stack alignment at every call, callee-saved preservation at every ret"
+python3 tools/check_stack_alignment.py --self-test
 python3 tools/check_stack_alignment.py --dir tests/typed_programs
 python3 tools/check_stack_alignment.py --dir tests/programs
 

@@ -98,11 +98,19 @@ bool run_native(const lithon::ir::Module& m, lithon::jit::CompileOptions options
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: tier_runner <file.ir> [--interp|--native|--auto|--strict]\n"
-                     "                  [--no-lsr] [--unroll-diamonds]\n";
+                     "                  [--no-lsr] [--accum-unroll] [--unroll-diamonds] [--dump-hex]\n"
+                     "                  [--ssa]\n"
+                     "       --accum-unroll splits a counted reduction's accumulator into 4 partials;\n"
+                     "       off by default (the win is ~1.6x on a long-latency float accumulator).\n"
+                     "       A float accumulator is reassociated, so its value may differ from the\n"
+                     "       interpreter's.\n"
+                     "       --ssa compiles through the SSA pipeline (canonicalize loops, Mem2Reg,\n"
+                     "       copy propagation + dead store elimination, phi resolution).\n";
         return 2;
     }
     const std::string path = argv[1];
     std::string mode = "--auto";
+    bool dump_hex = false;
     lithon::jit::CompileOptions options;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -110,8 +118,16 @@ int main(int argc, char** argv) {
             mode = a;
         } else if (a == "--no-lsr") {
             options.strength_reduce = false;
+        } else if (a == "--accum-unroll") {
+            options.accum_unroll = 4;
+        } else if (a == "--no-accum-unroll") {
+            options.accum_unroll = 1;
         } else if (a == "--unroll-diamonds") {
             options.unroll_diamonds = true;
+        } else if (a == "--dump-hex") {
+            dump_hex = true;
+        } else if (a == "--ssa") {
+            options.ssa_pipeline = true;
         } else {
             std::cerr << "unknown argument: " << a << "\n";
             return 2;
@@ -135,6 +151,21 @@ int main(int argc, char** argv) {
         }
 
         if (mode == "--interp") { run_interpreter(module); return 0; }
+
+        // --dump-hex prints the compiled machine code instead of running it,
+        // which is the only way to show WHICH encoding was chosen for a given
+        // source form. A literal count has to come out as C1/D1 (shift by an
+        // immediate, never touching CL) and a dynamic count as D3 + a CL
+        // load, and neither is visible from the source or from the output.
+        if (dump_hex) {
+            auto cm = lithon::jit::compile_module(module, options);
+            for (size_t i = 0; i < cm.code.size(); ++i) {
+                std::fprintf(stderr, "%02x", cm.code[i]);
+                std::fputc((i % 16 == 15) ? '\n' : ' ', stderr);
+            }
+            if (cm.code.size() % 16 != 0) std::fputc('\n', stderr);
+            return 0;
+        }
 
         if (mode == "--auto" || mode == "--strict") {
             auto verdict = lithon::jit::check_print_safety(module);

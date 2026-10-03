@@ -148,6 +148,33 @@ block0:
     call print, %27
     return
 """, "tier1"),
+    # The allocator may hand a dynamic shift's result RCX (it is a member of
+    # kTempPool on POSIX), and `shl rcx, cl` would shift a register by its own
+    # low bits. So the result is computed elsewhere and moved into RCX -- which
+    # has to happen AFTER the pop that restores the shift count, or the pop
+    # overwrites the result with the count and the store commits the count.
+    # The first shl below is allocated to RCX, so this is that exact case.
+    "dynamic_shift_rcx_dst": ("""
+function main():
+block0:
+    %0 = const_i64 5
+    store v, %0 : int[64]
+    %1 = const_i64 3
+    store k, %1 : int[64]
+    %2 = load v
+    %3 = load k
+    %4 = shl %2, %3
+    store r1, %4 : int[64]
+    %5 = const_i64 255
+    %6 = load k
+    %7 = shr %5, %6
+    store r2, %7 : int[64]
+    %8 = load r1
+    call print, %8
+    %9 = load r2
+    call print, %9
+    return
+""", "tier1"),
     "int_and_or_value_semantics": ("""
 function main():
 block0:

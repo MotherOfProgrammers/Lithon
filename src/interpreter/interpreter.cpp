@@ -138,6 +138,53 @@ LithonValue apply_boolop(Op op, LithonValue lhs, LithonValue rhs) {
     }
 }
 
+// Bitwise/shift. Int-only, on purpose: there is no float bit pattern in
+// Lithon, so `2.5 & 1` is a type error rather than a reinterpreting of the
+// double's bits.
+//
+// The shift-count bound is the important part. x86 masks the count to its low
+// 6 bits, so `x << 64` on hardware is `x << 0` -- silently the wrong answer,
+// and the classic way shift bugs survive review. Python raises ValueError for
+// a negative or oversized count, so trapping agrees with it; the typechecker
+// rejects the literal case before we ever get here, and this is the backstop
+// for the dynamic case.
+LithonValue apply_bitop(Op op, LithonValue lhs, LithonValue rhs) {
+    if (!lhs.is_int() || !rhs.is_int()) {
+        throw std::runtime_error("interpreter: bitwise op on a non-int value "
+                                 "(and/or/xor/shl/shr are integer-only)");
+    }
+    int64_t a = lhs.as_int(), b = rhs.as_int();
+    switch (op) {
+        case Op::BitAnd: return LithonValue::make_int(a & b);
+        case Op::BitOr:  return LithonValue::make_int(a | b);
+        case Op::BitXor: return LithonValue::make_int(a ^ b);
+        case Op::Shl:
+            if (b < 0 || b > 63) {
+                // Fixed text, no count: run_tier_diff.py compares stderr
+                // byte-for-byte and the JIT's trap passes a literal string, so
+                // a formatted count here would show up as a tier diff. The
+                // compile-time message for a literal count does include it.
+                throw std::runtime_error("interpreter: shift count out of range 0..63 for `<<`");
+            }
+            // Unsigned shift, then reinterpret: shifting a negative int64 left
+            // into the sign bit is well-defined via the unsigned domain, while
+            // the signed form is UB (C++17) / defined only as a modulo result
+            // (C++20). Going through uint64_t makes it a plain bit operation
+            // either way and matches the wrapping x86 shl performs.
+            return LithonValue::make_int(
+                static_cast<int64_t>(static_cast<uint64_t>(a) << static_cast<uint64_t>(b)));
+        case Op::Shr:
+            if (b < 0 || b > 63) {
+                throw std::runtime_error("interpreter: shift count out of range 0..63 for `>>`");
+            }
+            // Arithmetic (sign-propagating): C++20 mandates this for signed
+            // operands, and it is what Python's >> does, so -1 >> 1 is -1.
+            return LithonValue::make_int(a >> static_cast<uint64_t>(b));
+        default:
+            throw std::runtime_error("interpreter: not a bitwise op");
+    }
+}
+
 void do_print(LithonValue v) {
     if (v.is_bool())        std::cout << (v.as_bool() ? "True" : "False") << "\n";
     else if (v.is_int())    std::cout << v.as_int() << "\n";
@@ -243,6 +290,14 @@ LithonValue execute_function(const Module& module, const Function& fn,
                 case Op::And:
                 case Op::Or:
                     frame.regs[instr.result] = apply_boolop(
+                        instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
+                    break;
+                case Op::Shl:
+                case Op::Shr:
+                case Op::BitAnd:
+                case Op::BitOr:
+                case Op::BitXor:
+                    frame.regs[instr.result] = apply_bitop(
                         instr.op, frame.get_reg(instr.args.at(0)), frame.get_reg(instr.args.at(1)));
                     break;
                 case Op::Not: {

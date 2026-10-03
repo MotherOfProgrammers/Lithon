@@ -28,6 +28,16 @@ Static analysis over Python's ast -- no execution. Enforces:
   0.6.12 -- range()'s produced values are checked against the loop
             variable's declared width at compile time when known
 
+Bitwise and shift operators (<<, >>, &, |, ^) are integer-only and
+are NOT part of the arithmetic promotion rule: `2.5 & 1` is a type
+error, because Lithon has no float bit pattern to reinterpret. Their
+result takes the LEFT operand's width. A shift count that is a
+literal must be 0..63 -- the machine word is 64 bits, and x86 masks
+the count to 6 bits, so a count of 64 would silently execute as 0.
+A non-literal count is checked at runtime instead. Note this is a
+deliberate divergence from CPython, where ints are unbounded and
+`1 << 64` is a valid 65-bit result.
+
 Note: a bare integer literal defaults to int[64] per 0.6.3. Passing
 one directly as an argument to a parameter narrower than int[64] is
 therefore always rejected as narrowing (0.6.11) -- the argument must
@@ -192,6 +202,8 @@ class TypeChecker:
         if isinstance(node, ast.BinOp):
             left_t = self.infer_expr_type(node.left, scope, context)
             right_t = self.infer_expr_type(node.right, scope, context)
+            if isinstance(node.op, (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)):
+                return self.infer_bitop_type(node.op, left_t, right_t, node.right, context)
             return self.infer_binop_type(node.op, left_t, right_t, context)
 
         if isinstance(node, ast.Compare):
@@ -250,6 +262,103 @@ class TypeChecker:
             return LType("int", max(left.width, right.width))
         raise RCRError(f"{context}: cannot apply arithmetic to {left} and {right}")
 
+    def infer_bitop_type(self, op, left: LType, right: LType, count_node, context):
+        """Integer-only bitwise/shift. Mirrors check_instr's case in
+        src/typecheck/typecheck.cpp, including the left-operand-width result,
+        so the two checkers cannot drift.
+
+        Deliberately not infer_binop_type: that one promotes any int/float mix
+        to float, and `2.5 & 1` is an error, not a float.
+        """
+        if left.kind != "int" or right.kind != "int":
+            bad = left if left.kind != "int" else right
+            raise RCRError(
+                f"{context}: bitwise operand has type {bad} -- shl/shr/and/or/xor are "
+                f"integer-only; Lithon has no float bit pattern to reinterpret "
+                f"(V1_SPEC 0.6.11)")
+
+        if isinstance(op, (ast.LShift, ast.RShift)):
+            k = literal_kind(count_node)
+            if k == "int" and not (0 <= count_node.value <= 63):
+                sym = "<<" if isinstance(op, ast.LShift) else ">>"
+                raise RCRError(
+                    f"{context}: shift count {count_node.value} is out of range 0..63 for "
+                    f"`{sym}` -- the machine word is 64 bits and a count outside 0..63 has "
+                    f"no defined meaning (V1_SPEC 0.6.11)")
+
+        return LType("int", left.width)
+
+    def binop_result_range(self, op, left_node, right_node, scope, context):
+        """The (lo, hi) a binop can produce, or None if not decidable now.
+
+        Mirrors check_binop_fits_target in src/typecheck/typecheck.cpp. That
+        pass is reached from declarations, re-assignments, call arguments AND
+        returns, so this has to be one function rather than something only the
+        return path calls: a `b: int[8] = a << 3` that the C++ pass rejects must
+        not be accepted just because it is not in a return.
+        """
+        def operand_range(n):
+            if literal_kind(n) == "int":
+                return (n.value, n.value)
+            t = self.infer_expr_type(n, scope, context)
+            if t.kind != "int":
+                return None
+            return int_range(t.width)
+
+        left_range = operand_range(left_node)
+        right_range = operand_range(right_node)
+        if left_range is None or right_range is None:
+            return None
+        lo1, hi1 = left_range
+        lo2, hi2 = right_range
+
+        if isinstance(op, ast.Add):
+            return (lo1 + lo2, hi1 + hi2)
+        if isinstance(op, ast.Sub):
+            return (lo1 - hi2, hi1 - lo2)
+        if isinstance(op, ast.LShift):
+            # The count's own validity is a separate question, already settled
+            # by infer_bitop_type when it is a literal. A count that is not a
+            # constant, or that is out of 0..63 and will trap at run time, is
+            # not ours to range-check: there is no value to report.
+            if lo2 < 0 or hi2 > 63:
+                return None
+            # Shifting left magnifies, so the smallest result comes from the
+            # smallest value at the LARGEST count, and vice versa.
+            return (lo1 << hi2, hi1 << lo2)
+        corners = [lo1 * lo2, lo1 * hi2, hi1 * lo2, hi1 * hi2]
+        return (min(corners), max(corners))
+
+    def check_binop_fits_target(self, op, left_node, right_node, target, scope, context):
+        """Reject a binop whose possible range escapes `target`. No-op unless
+        the target is a narrow int, since a 64-bit int holds every result any
+        of these can produce."""
+        if target.kind != "int" or target.width >= 64:
+            return
+        possible = self.binop_result_range(op, left_node, right_node, scope, context)
+        if possible is None:
+            return
+        possible_lo, possible_hi = possible
+        target_lo, target_hi = int_range(target.width)
+        if possible_lo >= target_lo and possible_hi <= target_hi:
+            return
+
+        if isinstance(op, ast.LShift):
+            # Matches the dedicated Shl message in typecheck.cpp word for word,
+            # so the same mistake reads identically whichever checker caught it.
+            count = right_node.value if literal_kind(right_node) == "int" else ""
+            raise RCRError(
+                f"{context}: type {target} is not wide enough -- `x << {count}` can produce "
+                f"up to {possible_hi}, which exceeds {target}'s range "
+                f"{target_lo}..{target_hi}. Declare a wider type explicitly "
+                f"(V1_SPEC 0.5, 0.6.5) -- the compiler will not auto-widen it for you.")
+
+        raise RCRError(
+            f"{context}: type {target} is not wide enough -- this operation can produce "
+            f"{possible_lo}..{possible_hi}, which exceeds {target}'s range "
+            f"{target_lo}..{target_hi}. Declare a wider type explicitly "
+            f"(V1_SPEC 0.5, 0.6.5) -- the compiler will not auto-widen it for you.")
+
     def check_stmt_return(self, node, sig: FunctionSig, scope, context):
         if node.value is None:
             if sig.return_type is not None:
@@ -257,38 +366,10 @@ class TypeChecker:
                                 f"{sig.return_type} but this 'return' has no value")
             return
 
-        if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, (ast.Add, ast.Sub, ast.Mult)):
-            def op_range(operand_node):
-                k = literal_kind(operand_node)
-                if k == "int":
-                    v = operand_node.value
-                    return v, v
-                t = self.infer_expr_type(operand_node, scope, context)
-                if t.kind != "int":
-                    return None
-                return int_range(t.width)
-
-            left_range = op_range(node.value.left)
-            right_range = op_range(node.value.right)
-            if left_range and right_range and sig.return_type.kind == "int":
-                lo1, hi1 = left_range
-                lo2, hi2 = right_range
-                if isinstance(node.value.op, ast.Add):
-                    possible_lo, possible_hi = lo1 + lo2, hi1 + hi2
-                elif isinstance(node.value.op, ast.Sub):
-                    possible_lo, possible_hi = lo1 - hi2, hi1 - lo2
-                else:
-                    corners = [lo1*lo2, lo1*hi2, hi1*lo2, hi1*hi2]
-                    possible_lo, possible_hi = min(corners), max(corners)
-
-                target_lo, target_hi = int_range(sig.return_type.width)
-                if possible_lo < target_lo or possible_hi > target_hi:
-                    raise RCRError(
-                        f"{context}: return type {sig.return_type} is not wide enough -- "
-                        f"this operation can produce {possible_lo}..{possible_hi}, which "
-                        f"exceeds {sig.return_type}'s range {target_lo}..{target_hi}. "
-                        f"Declare a wider return type explicitly (V1_SPEC 0.5, 0.6.5) -- "
-                        f"the compiler will not auto-widen it for you.")
+        if isinstance(node.value, ast.BinOp) and isinstance(
+                node.value.op, (ast.Add, ast.Sub, ast.Mult, ast.LShift)):
+            self.check_binop_fits_target(node.value.op, node.value.left, node.value.right,
+                                         sig.return_type, scope, context)
 
         value_t = self.infer_expr_type(node.value, scope, context)
         check_assignment_compatible(value_t, sig.return_type, context)
@@ -297,6 +378,17 @@ class TypeChecker:
         if literal_kind(value_node) is not None:
             check_literal_kind(value_node, declared, context)
             check_literal_overflow(value_node, declared, context)
+        elif isinstance(value_node, ast.BinOp) and isinstance(
+                value_node.op, (ast.Add, ast.Sub, ast.Mult, ast.LShift)):
+            # check_value_into_target in typecheck.cpp range-checks a binop
+            # against whatever it is being stored into, and it is reached from
+            # declarations and re-assignments as well as arguments and
+            # returns. Without this, `b: int[8] = a << 3` is rejected by the
+            # C++ pass and accepted here.
+            self.check_binop_fits_target(value_node.op, value_node.left, value_node.right,
+                                         declared, scope, context)
+            source_type = self.infer_expr_type(value_node, scope, context)
+            check_assignment_compatible(source_type, declared, context)
         else:
             source_type = self.infer_expr_type(value_node, scope, context)
             check_assignment_compatible(source_type, declared, context)

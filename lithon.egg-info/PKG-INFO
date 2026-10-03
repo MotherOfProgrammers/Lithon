@@ -207,6 +207,7 @@ fails when it regresses — not merely present.*
 | Liveness + register allocation | Shipped | `liveness_test`, `regalloc_test` |
 | IR text format | Shipped | `src/ir/text_parser.cpp` — no Python dependency in the engine |
 | Function calls, recursion, TCO | Shipped | `compile_module_call_test`, `fib_test`; self-tail-calls become loops, O(1) stack |
+| Bitwise ops and shifts | Shipped | `& \| ^ << >>`, int-only; `check_encoder_vs_as.py` proves all 5 encodings against GNU as, `typecheck_test` pins the static rules, `tests/programs/bitwise.py` is a pure CPython-agreement test |
 
 ### Optimization pipeline (this is the active work)
 
@@ -228,7 +229,7 @@ clock, one pinned core. See [Testing](#-testing) to reproduce them yourself.
 - **`Phi` has no emitter.** The IR can express it; the encoder cannot yet. It
   is the only missing opcode, and is needed for `if`-as-expression lowering
   once both arms must merge without a stack round-trip.
-- Net: **20 of the 21 IR opcodes are emitted.** The one missing one is `Phi`.
+- Net: **25 of the 26 IR opcodes are emitted.** The one missing one is `Phi`.
 
 ### `%` is C's `%`, not Python's
 
@@ -277,12 +278,63 @@ Integer `Mod` is also strength-reduced where it is exact: a constant divisor
 that is a power of two becomes a mask plus a sign fixup, since `-7 & 3` is `1`
 and not the `-3` that `-7 % 4` has to return.
 
+### Shifts are 64-bit, and their counts are checked
+
+`&`, `|`, `^`, `<<` and `>>` are integer-only, and each is a plain 64-bit
+machine operation. `>>` is arithmetic (`sar`), so `-8 >> 1` is `-4`.
+
+Three rules follow from "the machine word is 64 bits wide", and all three
+diverge from CPython, whose ints are unbounded:
+
+```python
+print(5 << 63)     # Lithon: -9223372036854775808   CPython: 46116860184273879040
+print(5 << 62)     # Lithon:  4611686018427387904   CPython: 4611686018427387904
+print(1 << 64)     # Lithon: RCR error              CPython: 18446744073709551616
+```
+
+- **Left shifts wrap.** `5 << 63` is `2**63 + 2**65`; only the low 64 bits
+  survive, which is `-2**63`. Nothing is trapped and nothing is auto-widened,
+  because there is no wider type to widen to. `5 << 62` happens to agree with
+  CPython — that is arithmetic luck, not a rule.
+- **A count outside `0..63` is refused**, at compile time when the count is a
+  literal and at run time when it is not. x86 masks the count to its low 6
+  bits, so `1 << 64` would execute as a shift by `0` and return `1`, and
+  `1 << -1` would shift by `63`. Lithon raises an error rather than returning
+  the wrong answer. `1 << 64` is a program that cannot run.
+- **No float punning.** `2.5 & 1` is a type error. There is no float bit
+  pattern in Lithon to reinterpret, and inventing one would mean `&` means two
+  different things depending on its operand types.
+
+The result width is the **left** operand's width, so `a & b` with `a: int[8]`
+is an `int[8]` and may be stored without narrowing. A shift into a target too
+narrow to hold the result is rejected statically when the count is a constant
+(`100 << 3` is `800`, which is not an `int[8]`).
+
+The encodings are the ones x86 actually has, and which one is used depends on
+whether the count is known at compile time — visible only in the generated
+code:
+
+```console
+$ build/tier_runner prog.ir --dump-hex   # then: objdump -D -b binary -m i386:x86-64
+shl rax,0x3      # 48 c1 e0 03   literal count 3, never touches CL
+shl rax,1        # 48 d1 e0      literal count 1, the 2-byte short form
+shl rax,cl       # 48 d3 e0      dynamic count
+sar rax,cl       # 48 d3 f8      dynamic count
+```
+
+A dynamic shift has to be careful about RCX, which is a member of `kTempPool`
+on POSIX and so can be holding the shift's own result. `shl rcx, cl` would
+shift a register by its own low bits, so the result is computed in R10 and
+moved into RCX — *after* the `pop` that restores the count, or the `pop`
+overwrites the result with the count itself. `run_tier_diff.py`'s
+`adversarial/dynamic_shift_rcx_dst` pins that exact allocation.
+
 ### Floating point, and what "identical" had to mean
 
 `float` is implemented end-to-end: `ConstFloat`, load/store, `Add`/`Sub`/`Mul`/
 `Div`/`Mod`, the three comparisons, and native `print()`. Both tiers now run
 `float.ir`, `mixed_numeric.ir` and `comparison.ir` natively, with
-`run_tier_diff.py` reporting 34/34 native and zero interpreter fallbacks.
+`run_tier_diff.py` reporting 37/37 native and zero interpreter fallbacks.
 
 The hard part was not the arithmetic — SSE2 is straightforward once the
 encoding is right — it was making the two engines agree *byte for byte*, since
@@ -371,7 +423,7 @@ TMPDIR=/path/to/scratch cmake --build build -j$(nproc)
 ### Layer 1 — unit tests (~0.1 s)
 
 ```bash
-ctest --test-dir build --output-on-failure        # 17/17
+ctest --test-dir build --output-on-failure        # 19/19
 ```
 
 The tests are not all the same kind, and it is worth knowing which is which:
@@ -398,9 +450,9 @@ The tests are not all the same kind, and it is worth knowing which is which:
 
 ```bash
 bash tools/verify_all.sh                         # ABI, stack alignment, callee-saved audit
-python3 tools/run_regression.py                  # 12/12 untyped programs
+python3 tools/run_regression.py                  # 14/14 untyped programs
 python3 tools/run_typed_regression.py            # 12/12 typed programs
-python3 tools/run_tier_diff.py                   # 34/34
+python3 tools/run_tier_diff.py                   # 37/37
 ```
 
 `run_tier_diff.py` is the highest-value of the four. It runs every program
@@ -517,7 +569,7 @@ honest next step is to move it out of that list.
 
 Two more limits worth stating plainly, because a passing run can obscure both:
 
-- **Opcode coverage is not operand coverage.** 20 of 21 opcodes are emitted and
+- **Opcode coverage is not operand coverage.** 25 of 26 opcodes are emitted and
   each is exercised through `tier_runner --strict`, so a pass proves the opcode
   was genuinely executed natively rather than fallen back. It does *not* prove
   every operand shape is right — that is what `encoder_test`'s byte-exact
@@ -542,7 +594,7 @@ Two more limits worth stating plainly, because a passing run can obscure both:
 
 | Benchmark | Lithon JIT | Reference | Speedup | Result |
 |---|---:|---:|---:|---:|
-| fib(30) | 7.0278 ms | 1447.2100 ms | 205.9× | 832040 |
+| fib(30) | 7.2094 ms | 1320.4701 ms | 183.2× | 832040 |
 
 **Status:** PASS
 

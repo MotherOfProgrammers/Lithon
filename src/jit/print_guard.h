@@ -231,6 +231,16 @@ struct Analysis {
                               join(val(st, in.args.at(0)), val(st, in.args.at(1))));
                         break;
 
+                    case Op::Shl: case Op::Shr:
+                    case Op::BitAnd: case Op::BitOr: case Op::BitXor:
+                        // Integer-only, so the result is Int unconditionally --
+                        // stated directly rather than joined from the operands,
+                        // so that a float sneaking in is reported as this
+                        // instruction's fault instead of being inherited.
+                        raise(st.vals[in.result], Kind::Int);
+                        if (final_pass) check_arith_operands(st, block, in, verdict);
+                        break;
+
                     case Op::Phi: {
                         Kind k = Kind::Unseen;
                         for (auto a : in.args) k = join(k, val(st, a));

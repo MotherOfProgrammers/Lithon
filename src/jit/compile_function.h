@@ -82,6 +82,14 @@ static const char kFloatPrintFormat[] = "%s\n";
 struct CompileOptions {
     bool optimize = true;          // constant folding + dead-code elimination
     bool strength_reduce = true;   // invariant*IV -> repeated add (needs optimize)
+    // Split a counted reduction's accumulator into this many partials, jammed
+    // into one unrolled body copy, and sum them after the loop. <=1 disables.
+    // Only applies with optimize=on; see accumulator_unroll() in optimize.h.
+    // Off by default: it is correct but a measured ~13% LOSS on the integer
+    // `sum 20M` reduction, because a 1-cycle integer add chain is already at
+    // the 1-element/cycle limit, so splitting only adds the exit sum. Opt in
+    // with --accum-unroll; it is aimed at long-latency (float) accumulators.
+    int accum_unroll = 1;
     bool promote_registers = true; // keep hot variables in registers
     // Let a temporary that is live across a call borrow a callee-saved
     // register no promoted variable is using, instead of living on the stack.
@@ -98,6 +106,13 @@ struct CompileOptions {
     // in the loop buffer / uop cache than the saved back edge is worth.
     // Straight-line unrolling above is the variant that pays.
     bool unroll_diamonds = false;
+    // SSA pipeline: canonicalize loops, promote promotable variables to SSA
+    // values (Mem2Reg), simplify with Phi-aware DSE + trivial-Phi copy
+    // propagation, then resolve the phis into edge copies so the existing
+    // backend can compile the result. Off by default because it is a
+    // correctness-first path, not a speed one -- see resolve_phis() for why the
+    // phis still travel through memory slots.
+    bool ssa_pipeline = false;
 };
 
 struct CompiledModule {
@@ -110,6 +125,22 @@ struct CompiledModule {
     // that memory. Empty for every module with no float constants,
     // which is all pre-float code.
     std::vector<uint64_t> float_pool;
+    // 2.5 accounting: how many resolved Phi copies became register moves and
+    // how many there were. They differ only when the callee-saved pool ran out,
+    // or when a merge carried a double (a GP register cannot hold one), so
+    // `in_registers < total` is the honest measure of what is still going
+    // through memory rather than a defect.
+    size_t phi_copies_in_registers = 0;
+    size_t phi_copies_total = 0;
+
+    // 2.8: merges deleted outright because every operand was the same value.
+    // Each one is a copy set that was never emitted, and -- more to the point
+    // -- a callee-saved register that was never spent holding one.
+    size_t phis_forwarded = 0;
+    // 2.8: merges whose destination took over a source's dead register, so that
+    // incoming edge's `mov` had no work left to do. Distinct from
+    // phis_forwarded above, which counts copies that never came into being.
+    size_t phi_copies_coalesced = 0;
 };
 
 namespace detail {
@@ -136,7 +167,12 @@ struct FunctionPlan {
     std::vector<std::vector<uint8_t>> skip_instr;   // [block][pos]: instruction fused away
 };
 
-inline FunctionPlan plan_function(const lithon::ir::Function& fn, const PromotionMap& promoted) {
+// `float_kinds`, when given, is the caller's per-value "is a double" table
+// (see infer_value_kinds). Only the compare fusion consults it: the branch it
+// fuses into re-uses the compare's integer flags, which is only the same
+// comparison when both operands are integers.
+inline FunctionPlan plan_function(const lithon::ir::Function& fn, const PromotionMap& promoted,
+                                  const std::vector<bool>* float_kinds = nullptr) {
     using namespace lithon::ir;
     FunctionPlan plan;
     plan.skip_instr.resize(fn.blocks.size());
@@ -151,6 +187,14 @@ inline FunctionPlan plan_function(const lithon::ir::Function& fn, const Promotio
     auto set = [&](ValueId id, TempInfo ti) {
         plan.info[id] = ti;
         plan.virtual_temps.insert(id);
+    };
+
+    // A float operand makes the compare unfusable: the branch would compare
+    // the raw bit patterns with an integer cmp, which orders doubles by their
+    // encoding, so 1.5 > 2.5 becomes true. The value then materialises as a
+    // real 0/1 bool and the branch tests that instead.
+    auto operand_is_float = [&](ValueId id) {
+        return float_kinds != nullptr && id < float_kinds->size() && (*float_kinds)[id];
     };
 
     for (size_t b = 0; b < fn.blocks.size(); ++b) {
@@ -201,7 +245,8 @@ inline FunctionPlan plan_function(const lithon::ir::Function& fn, const Promotio
 
             if ((in.op == Op::Lt || in.op == Op::Gt || in.op == Op::Eq) && has_next &&
                 ins[p + 1].op == Op::Branch && ins[p + 1].args.size() == 1 &&
-                ins[p + 1].args[0] == in.result && uses[in.result].size() == 1) {
+                ins[p + 1].args[0] == in.result && uses[in.result].size() == 1 &&
+                !operand_is_float(in.args.at(0)) && !operand_is_float(in.args.at(1))) {
                 TempInfo ti; ti.kind = TempInfo::Kind::FusedCmp;
                 set(in.result, ti);
                 continue;
@@ -240,23 +285,58 @@ inline bool is_rotatable_header(const lithon::ir::BasicBlock& block) {
     return true;
 }
 
-// A loop body qualifies for unrolling when it is straight-line, pure
-// arithmetic/moves that ends in the back-edge Jump: no calls, returns
-// or inner control flow to duplicate.
+// Safe to DUPLICATE into an unrolled copy of the same basic block.
+//
+// This is deliberately NOT the same predicate as is_pure_op() in optimize.h,
+// and conflating the two is what kept shifts out of the unroller. They answer
+// different questions:
+//
+//   * is_pure_op() means safe to MOVE -- hoisting out of a loop (LICM) or
+//     deleting when unused (DCE). A trapping op fails this. Hoisting an
+//     invariant `x << k` with a bad k out of a loop that never executes would
+//     introduce a trap the original program did not have, and deleting an
+//     unused `x << k` would remove it.
+//
+//   * is_unrollable_op() means safe to DUPLICATE within one iteration's worth
+//     of code. A trapping op passes this: the unroller emits each iteration
+//     exactly once, with the loop test inlined before every copy, so the
+//     sequence of executed shift/divide instructions -- and therefore which
+//     one traps first -- is unchanged. Duplicating is not moving.
+//
+// Store is already in this list and not in is_pure_op for the same shape of
+// reason: duplicating a store once per iteration preserves the program, but a
+// store is not movable at all. So the two predicates genuinely differ, and
+// this function exists to say how.
+inline bool is_unrollable_op(lithon::ir::Op op) {
+    using lithon::ir::Op;
+    switch (op) {
+        case Op::ConstInt: case Op::ConstBool: case Op::Load: case Op::Store:
+        case Op::Add: case Op::Sub: case Op::Mul:
+        case Op::Lt: case Op::Gt: case Op::Eq:
+        case Op::And: case Op::Or: case Op::Not:
+        case Op::BitAnd: case Op::BitOr: case Op::BitXor:
+        // Trapping, and therefore absent from is_pure_op: duplication cannot
+        // change which execution traps, but moving them can.
+        case Op::Shl: case Op::Shr:
+            return true;
+        // Div and Mod meet the same duplication criterion and could be
+        // enabled the same way. They are left out on purpose so this change
+        // stays scoped to the shift work rather than silently widening what
+        // the unroller duplicates; see the Div/Mod discussion in optimize.h.
+        default:
+            return false;
+    }
+}
+
+// A loop body qualifies for unrolling when it is straight-line,
+// duplication-safe operations ending in the back-edge Jump: no calls,
+// returns or inner control flow to duplicate.
 inline bool is_unrollable_body(const lithon::ir::BasicBlock& block) {
     using lithon::ir::Op;
     if (block.instrs.size() < 2 || block.instrs.size() > 16) return false;
     if (block.instrs.back().op != Op::Jump) return false;
     for (size_t i = 0; i + 1 < block.instrs.size(); ++i) {
-        switch (block.instrs[i].op) {
-            case Op::ConstInt: case Op::ConstBool: case Op::Load: case Op::Store:
-            case Op::Add: case Op::Sub: case Op::Mul:
-            case Op::Lt: case Op::Gt: case Op::Eq:
-            case Op::And: case Op::Or: case Op::Not:
-                break;
-            default:
-                return false;
-        }
+        if (!is_unrollable_op(block.instrs[i].op)) return false;
     }
     return true;
 }
@@ -367,6 +447,10 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
 
     CodeBuffer code;
     std::unordered_map<std::string, size_t> function_offset;
+    size_t phi_copies_in_registers = 0;
+    size_t phi_copies_total = 0;
+    size_t phis_forwarded = 0;
+    size_t phi_copies_coalesced = 0;
 
     struct PendingCallPatch {
         JumpPatch patch;
@@ -403,7 +487,13 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
 
     for (size_t fn_index = 0; fn_index < module.functions.size(); ++fn_index) {
         const Function& original_fn = module.functions[fn_index];
-        const std::vector<Kind>& value_kinds = module_kinds[fn_index];
+        // A mutable copy: accumulator_unroll is the one pass that invents new
+        // values, and when it splits a float accumulator those new values are
+        // doubles that the pre-optimization analysis never saw. It reports
+        // them in stats.accum_float_values and they are folded in below, so
+        // allocation and codegen classify them as floats. Existing ids keep
+        // their original kind, preserving interpreter-print parity.
+        std::vector<Kind> value_kinds = module_kinds[fn_index];
         if (function_offset.count(original_fn.name)) {
             throw std::runtime_error(
                 "compile_module: duplicate function name '" + original_fn.name + "'");
@@ -417,10 +507,31 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         }
 
         Function fn = original_fn;
+        if (options.ssa_pipeline) {
+            // Runs before the memory-form passes and before value kinds are
+            // consumed: Mem2Reg invents ValueIds for phis, and resolve_phis
+            // reuses those ids for the loads it leaves behind, so the kind
+            // table has to be re-derived from the transformed IR or those ids
+            // would read as Unknown and a float phi would print as an integer.
+            phis_forwarded += run_ssa_pipeline(fn).phis_forwarded;
+            Module ssa_module;
+            ssa_module.functions.push_back(fn);
+            value_kinds = infer_value_kinds(ssa_module).front();
+        }
+        std::vector<bool> is_float_kinds(value_kinds.size());
+        for (size_t i = 0; i < value_kinds.size(); ++i)
+            is_float_kinds[i] = (value_kinds[i] == Kind::Float);
         if (options.optimize) {
             OptimizePasses passes;
             passes.strength_reduce = options.strength_reduce;
-            optimize_function(fn, passes);
+            passes.accum_unroll = options.accum_unroll;
+            OptimizeStats stats = optimize_function(fn, passes, &is_float_kinds);
+            for (lithon::ir::ValueId id : stats.accum_float_values) {
+                if (id >= value_kinds.size()) value_kinds.resize(id + 1, Kind::Unknown);
+                value_kinds[id] = Kind::Float;
+                is_float_kinds.resize(value_kinds.size(), false);
+                is_float_kinds[id] = true;
+            }
         }
 
         PromotionMap promoted = options.promote_registers ? select_promoted_variables(fn)
@@ -438,6 +549,26 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         // This is the one place the float and integer register worlds meet,
         // and it is a subtraction, not an addition: the GP machinery is
         // untouched.
+// 2.5: top up the promotion set with dedicated registers for Phi
+        // variables. A resolved Phi is an ordinary Load plus one Store per
+        // incoming edge, so most already won a register from
+        // select_promoted_variables above; this is for the ones that lost that
+        // ranking to a hotter variable, or were never scored at all because the
+        // pool ran out first.
+        //
+        // Placed BEFORE the float subtraction, deliberately, so a merge
+        // carrying a double is removed by exactly the same rule that governs
+        // every other variable. Adding after would re-promote what the loop
+        // above just erased, and the abort it provokes --
+        // "float value aliases a general-purpose register" -- is the precise
+        // complaint the subtraction exists to prevent. Keeping the ordering
+        // requirement in one place is why the counting below is separate: it
+        // has to observe the FINAL set.
+        if (options.ssa_pipeline && options.promote_registers) {
+            const PromotionMap top_up = select_phi_registers(fn, promoted);
+            promoted.insert(top_up.begin(), top_up.end());
+        }
+
         for (size_t b = 0; b < fn.blocks.size(); ++b) {
             for (const auto& in : fn.blocks[b].instrs) {
                 if (in.op == Op::Store && !in.args.empty() &&
@@ -448,7 +579,17 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                 }
             }
         }
-        detail::FunctionPlan plan = detail::plan_function(fn, promoted);
+
+        // 2.5 accounting, on the FINAL promotion set. Reporting a
+        // double merge as a register move would be a lie -- a GP register
+        // cannot hold one -- so this runs after the subtraction, not before it.
+        if (options.ssa_pipeline) {
+            phi_copies_total += phi_copy_variables(fn).size();
+            for (const auto& kv : promoted)
+                if (is_phi_var(kv.first)) ++phi_copies_in_registers;
+        }
+
+        detail::FunctionPlan plan = detail::plan_function(fn, promoted, &is_float_kinds);
         // Every value the guard proved is a double, in one list. Handing the
         // allocator that list -- rather than letting it re-derive kinds --
         // is what keeps allocation and codegen reading the same lattice.
@@ -458,6 +599,10 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         }
         RegisterAllocator alloc(fn, promoted, plan.virtual_temps,
                                 options.borrow_callee_saved, float_values);
+
+        // 2.8. Counted from the allocator, which rewrote its own promotion map
+        // while allocating -- see RegisterAllocator::coalesce_phi_registers.
+        phi_copies_coalesced += alloc.phi_copies_coalesced();
 
         constexpr Reg kL = abi::kScratchLeft;
         constexpr Reg kR = abi::kScratchRight;
@@ -1181,6 +1326,29 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                             if (!fused) commit_result(instr.result, dst);
                             break;
                         }
+                        if (instr.op == Op::Div) {
+                            // `/` is TRUE division in Lithon and always yields
+                            // a double (V1_SPEC 0.2), so infer_value_kinds
+                            // raises a Div to Float and this integer body is
+                            // not supposed to be reachable at all. It used to
+                            // fall through the add/sub/mul chain below and emit
+                            // a SUBTRACTION -- a silently wrong answer rather
+                            // than a crash, which is the worst failure mode
+                            // available because it is only reachable from a
+                            // kind lattice that failed to resolve.
+                            //
+                            // The one way in is two Unknown operands, and
+                            // check_arith_operands already marks such a module
+                            // not native_safe, so nothing executes here today.
+                            // Refusing anyway costs one comparison and turns a
+                            // future regression in the lattice into a compile
+                            // error instead of a wrong program.
+                            throw std::runtime_error(
+                                "compile_module: integer div reached the integer path -- "
+                                 "'/' is true division and always produces float "
+                                 "(V1_SPEC 0.2), so this is a bug in the value-kind "
+                                 "lattice, not a valid operation");
+                        }
                         if (imm32_of(instr.args.at(1), imm)) {
                             if (instr.op == Op::Mul) {
                                 emit_imul_reg_reg_imm32(code, dst, lhs, imm);
@@ -1279,6 +1447,142 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
                         emit_setcc(code, Cond::Equal, dst);
                         emit_movzx_reg_reg8(code, dst, dst);
                         commit_result(instr.result, dst);
+                        break;
+                    }
+
+                    case Op::BitAnd:
+                    case Op::BitOr:
+                    case Op::BitXor: {
+                        // The _reg_reg64 encoders, not emit_and_reg_reg: REX.W
+                        // is mandatory here, since without it the op is 32-bit
+                        // and would zero the high half of a negative operand.
+                        //
+                        // These are all two-operand forms (dst is also an
+                        // input), so dst must be loaded from the LEFT operand
+                        // first. compute_dest returns whatever register the
+                        // allocator picked, whose previous contents are
+                        // whatever the last instruction happened to leave --
+                        // so without the mov below this silently computes
+                        // garbage & garbage.
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
+                        Reg dst = compute_dest(instr.result);
+                        if (rhs == dst) {
+                            // dst holds the right operand and is about to be
+                            // overwritten; going through kR keeps both live.
+                            // (The arithmetic path handles the same collision
+                            // for Sub, which is the only non-commutative one
+                            // there -- but a register can hold either operand
+                            // here, so the guard is needed regardless of
+                            // commutativity.)
+                            emit_mov_reg_reg(code, kR, lhs);
+                            if (instr.op == Op::BitAnd)      emit_and_reg_reg64(code, kR, rhs);
+                            else if (instr.op == Op::BitOr)  emit_or_reg_reg64(code, kR, rhs);
+                            else                             emit_xor_reg_reg64(code, kR, rhs);
+                            emit_mov_reg_reg(code, dst, kR);
+                        } else {
+                            if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                            if (instr.op == Op::BitAnd)      emit_and_reg_reg64(code, dst, rhs);
+                            else if (instr.op == Op::BitOr)  emit_or_reg_reg64(code, dst, rhs);
+                            else                             emit_xor_reg_reg64(code, dst, rhs);
+                        }
+                        commit_result(instr.result, dst);
+                        break;
+                    }
+
+                    case Op::Shl:
+                    case Op::Shr: {
+                        // Shr is arithmetic (sar), so -1 >> 1 is -1, matching
+                        // the interpreter and Python.
+                        bool is_shl = instr.op == Op::Shl;
+                        int32_t shamt = 0;
+                        if (imm32_of(instr.args.at(1), shamt) && shamt >= 0 && shamt <= 63) {
+                            // Constant count: the count lives in the
+                            // instruction, so no scratch register, no move
+                            // into CL, and no save/restore of RCX at all.
+                            // Same two-operand rule as above -- dst is an
+                            // input, so it has to be primed from lhs.
+                            Reg lhs = read_left(instr.args.at(0));
+                            Reg dst = compute_dest(instr.result);
+                            if (lhs != dst) emit_mov_reg_reg(code, dst, lhs);
+                            if (shamt == 1) {
+                                if (is_shl) emit_shl_reg_1(code, dst);
+                                else        emit_sar_reg_1(code, dst);
+                            } else if (is_shl) {
+                                emit_shl_reg_imm8(code, dst, static_cast<uint8_t>(shamt));
+                            } else {
+                                emit_sar_reg_imm8(code, dst, static_cast<uint8_t>(shamt));
+                            }
+                            commit_result(instr.result, dst);
+                            break;
+                        }
+                        // Variable count. Two separate hazards here.
+                        //
+                        // (1) The count must be 0..63. x86 masks the count to
+                        //     its low 6 bits, so an unchecked -1 or 64 does
+                        //     not fault -- it quietly shifts by 63 or 0 and
+                        //     returns a wrong answer. The typechecker catches
+                        //     the literal case statically; this is the runtime
+                        //     backstop for a count only known at run time, and
+                        //     it is what makes the native tier agree with the
+                        //     interpreter's apply_bitop.
+                        //
+                        // (2) D3 /digit is the ONLY encoding that takes a
+                        //     runtime count and it hard-codes CL, so RCX has
+                        //     to hold the count and has to survive. On POSIX
+                        //     RCX is not allocatable at all so the push/pop is
+                        //     insurance, but it is not redundant on the other
+                        //     kTempPool branch, where RCX is a general
+                        //     register and anything live there would be
+                        //     silently destroyed.
+                        //
+                        // The bounds test reads the count from wherever it
+                        // already lives and runs BEFORE the push, so the
+                        // trap's host call sees the same 16-byte-aligned RSP
+                        // every other call in this function does. A negative
+                        // count needs no separate test: as an unsigned value
+                        // it is >= 2^63, so one unsigned compare covers both
+                        // ends of the range.
+                        Reg lhs = read_left(instr.args.at(0));
+                        Reg rhs = read_right(instr.args.at(1));
+                        Reg dst = compute_dest(instr.result);
+                        emit_cmp_reg_imm32(code, rhs, 63);
+                        // Skip the trap when the count is in range. jbe is the
+                        // UNSIGNED <=, which is what makes one test cover a
+                        // negative count too: -1 reads as a huge u64, so it
+                        // fails this and falls into the trap.
+                        JumpPatch count_in_range = emit_jcc_rel32(code, Cond::JumpBelowEq);
+                        if (is_shl)
+                            emit_host_error_trap(
+                                "error: interpreter: shift count out of range 0..63 for `<<`\n");
+                        else
+                            emit_host_error_trap(
+                                "error: interpreter: shift count out of range 0..63 for `>>`\n");
+                        resolve_jump_patch(code, count_in_range, code.size());
+
+                        // `shl rcx, cl` would read the value and the count out
+                        // of the same bits, so RCX cannot also be the
+                        // destination. This is not hypothetical: the
+                        // allocator really does hand out RCX, so when it picks
+                        // RCX for the result the shift has to compute
+                        // somewhere else and the result moved across AFTER the
+                        // pop. Moving it before the pop looks right and is not:
+                        // the pop immediately overwrites RCX with its old
+                        // value, and the store then commits that stale
+                        // register instead of the shift result.
+                        bool dst_was_rcx = (dst == Reg::RCX);
+                        Reg compute = dst_was_rcx ? abi::kScratchLeft : dst;
+                        emit_push_reg(code, Reg::RCX);
+                        // Order matters: stash the count in RCX BEFORE the
+                        // destination is written, since dst may itself be the
+                        // register holding the count.
+                        emit_mov_reg_reg(code, Reg::RCX, rhs);
+                        if (lhs != compute) emit_mov_reg_reg(code, compute, lhs);
+                        if (is_shl) emit_shl_reg_cl(code, compute);
+                        else        emit_sar_reg_cl(code, compute);
+                        emit_pop_reg(code, Reg::RCX);
+                        if (dst_was_rcx) emit_mov_reg_reg(code, Reg::RCX, compute);
+                        commit_result(instr.result, dst_was_rcx ? Reg::RCX : dst);
                         break;
                     }
 
@@ -1628,7 +1932,15 @@ inline CompiledModule compile_module(const lithon::ir::Module& module,
         }
     }
 
-    return CompiledModule{std::move(code), std::move(function_offset), std::move(float_pool)};
+    CompiledModule compiled;
+    compiled.code = std::move(code);
+    compiled.function_offset = std::move(function_offset);
+    compiled.float_pool = std::move(float_pool);
+    compiled.phi_copies_in_registers = phi_copies_in_registers;
+    compiled.phi_copies_total = phi_copies_total;
+    compiled.phis_forwarded = phis_forwarded;
+    compiled.phi_copies_coalesced = phi_copies_coalesced;
+    return compiled;
 }
 
 } // namespace lithon::jit

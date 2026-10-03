@@ -5,6 +5,12 @@
   python3 tools/native_bench.py --runs 30 --pin 2  # pin to CPU 2 (uses taskset)
   python3 tools/native_bench.py --json benchmarks/results/native_after.json
   python3 tools/native_bench.py --compare benchmarks/results/native_before.json
+  python3 tools/native_bench.py --only float --runner-args='--accum-unroll'   # opt-in pass
+
+The `float reduce 20M` workload is the accumulator-split target: run it once plain
+and once with --runner-args='--accum-unroll' to see the end-to-end effect of the
+opt-in pass. NOTE the split reassociates the FP adds, so the printed value is not
+bit-identical to the interpreter's.
 
 Each workload: frontend.py -> IR -> `tier_runner --strict`, wall-clock of the whole
 process. The start-up cost (median-of-min of a trivial print(0) program) is
@@ -16,7 +22,7 @@ the machine is. Differences under ~5% between two runs are not meaningful.
 Workloads marked (stress) exercise things the four official benchmarks do not:
 register pressure, calls inside loops, and deep tail recursion.
 """
-import argparse, json, pathlib, shutil, statistics, subprocess, sys, tempfile, time
+import argparse, json, pathlib, shlex, shutil, statistics, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -24,6 +30,7 @@ def workloads():
     return {
         "fib(30)": "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nprint(fib(30))\n",
         "sum 20M": "total = 0\nfor i in range(20000000):\n    total += i\nprint(total)\n",
+        "float reduce 20M": "total = 0.0\nfor i in range(20000000):\n    total += i * 0.5\nprint(total)\n",
         "nested 3000x3000": "total = 0\nfor i in range(3000):\n    for j in range(3000):\n        total += i * j\nprint(total)\n",
         "branchy 10M": "count = 0\nfor i in range(10000000):\n    if i < 5000000:\n        count += 1\n    else:\n        count += 2\nprint(count)\n",
         "(stress) 8 live vars 20M": ("a = 1\nb = 2\nc = 3\nd = 4\ne = 5\nf = 6\ng = 7\n"
@@ -39,12 +46,16 @@ def main():
     ap.add_argument("--pin", type=int, default=None, help="pin to this CPU core with taskset")
     ap.add_argument("--root", type=pathlib.Path, default=ROOT)
     ap.add_argument("--runner", type=pathlib.Path, default=None)
+    ap.add_argument("--runner-args", default="",
+                    help="extra args passed to the runner, shell-split; e.g. "
+                         "--runner-args='--accum-unroll' to measure the opt-in pass")
     ap.add_argument("--json", type=pathlib.Path, default=None)
     ap.add_argument("--compare", type=pathlib.Path, default=None, help="earlier --json file to compare against")
     ap.add_argument("--only", default=None, help="substring filter on workload names")
     a = ap.parse_args()
 
     runner = a.runner or a.root / "build" / "tier_runner"
+    runner_args = shlex.split(a.runner_args)
     frontend = a.root / "src" / "frontend" / "frontend.py"
     if not runner.exists():
         print(f"error: {runner} not found -- build it first"); return 2
@@ -61,7 +72,8 @@ def main():
 
     def once(ir):
         t = time.perf_counter()
-        r = subprocess.run(prefix + [str(runner), str(ir), "--strict"], capture_output=True, text=True)
+        r = subprocess.run(prefix + [str(runner), str(ir), "--strict"] + runner_args,
+                           capture_output=True, text=True)
         ms = (time.perf_counter() - t) * 1000
         if r.returncode: raise RuntimeError(f"tier_runner exited {r.returncode}: {r.stderr.strip()[:200]}")
         return ms, r.stdout.strip()

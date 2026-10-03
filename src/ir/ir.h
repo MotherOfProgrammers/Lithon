@@ -39,6 +39,26 @@ enum class Op : uint8_t {
     Or,
     Not,
 
+    // Bitwise, and integer-only. These are deliberately separate from the
+    // And/Or above rather than overloading them: those are logical ops with
+    // value semantics (the result IS one of the operands, so `x and y` is y
+    // whenever x is truthy), which is not a bit operation at all. A single
+    // op that meant both would make `&` and `and` differ in result TYPE, not
+    // just in result value, and the print guard's int/bool tracking -- which
+    // is the whole reason these are separate -- would have nothing to key on.
+    //
+    // Shl/Shr are 64-bit two's-complement. Shr is an ARITHMETIC shift: it
+    // replicates the sign bit, matching Python's >> and the interpreter's
+    // int64_t >>, so -1 >> 1 is -1 here too. Shift counts are range-checked
+    // to 0..63 at compile time when literal, and at runtime otherwise,
+    // because x86 masks the count to 6 bits -- a count of 64 would silently
+    // execute as 0 and quietly produce the wrong answer instead of trapping.
+    Shl,
+    Shr,
+    BitAnd,
+    BitOr,
+    BitXor,
+
     Call,
     Return,
 

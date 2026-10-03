@@ -32,6 +32,10 @@ int main() {
                                 -1, -2147483648LL, -2147483649LL, INT64_MAX, INT64_MIN};
     const int32_t rsp_imms[] = {128, 1024, 4096};
     const int32_t imul_imms[] = {3, -5, 127, 128, -129, 100000};
+    // Every legal count, including both ends. 0 and 64 are the interesting
+    // ones: x86 masks the count to 6 bits, so 64 would execute as 0, which is
+    // why compile_function.h range-checks before emitting.
+    const int32_t shift_imms[] = {0, 1, 7, 31, 32, 63};
     const int32_t disps[] = {-300, 1000, -100000};
     struct CC { Cond c; const char* n; } ccs[] = {
         {Cond::Less,"l"},{Cond::GreaterEq,"ge"},{Cond::LessEq,"le"},{Cond::Greater,"g"},
@@ -71,6 +75,20 @@ int main() {
             CodeBuffer b; emit_setcc(b, cc.c, rd);
             line(std::string("set") + cc.n + " " + R8B[d], b);
         }
+        { CodeBuffer b; emit_shl_reg_1(b, rd); line("shl " + D + ", 1", b); }
+        { CodeBuffer b; emit_sar_reg_1(b, rd); line("sar " + D + ", 1", b); }
+        for (auto v : shift_imms) {
+            if (v == 1) continue;   // covered by the D1 short form above
+            { CodeBuffer b; emit_shl_reg_imm8(b, rd, static_cast<uint8_t>(v));
+              line("shl " + D + ", " + std::to_string(v), b); }
+            // sar, not shr: shr is the /5 LOGICAL form and would make `>>` on a
+            // negative value wrong. Cross-checking this against as is what
+            // keeps the two from being confused again.
+            { CodeBuffer b; emit_sar_reg_imm8(b, rd, static_cast<uint8_t>(v));
+              line("sar " + D + ", " + std::to_string(v), b); }
+        }
+        { CodeBuffer b; emit_shl_reg_cl(b, rd); line("shl " + D + ", cl", b); }
+        { CodeBuffer b; emit_sar_reg_cl(b, rd); line("sar " + D + ", cl", b); }
         for (int s = 0; s < 16; ++s) {
             Reg rs = static_cast<Reg>(s);
             std::string S = R64[s];
@@ -79,6 +97,15 @@ int main() {
             { CodeBuffer b; emit_sub_reg_reg(b, rd, rs); line("sub " + D + ", " + S, b); }
             { CodeBuffer b; emit_cmp_reg_reg(b, rd, rs); line("cmp " + D + ", " + S, b); }
             { CodeBuffer b; emit_imul_reg_reg(b, rd, rs); line("imul " + D + ", " + S, b); }
+            // The 64-bit bitwise ALU. These carry REX.W; the 32-bit
+            // emit_and_reg_reg below deliberately does not, and listing both
+            // here is what makes that difference checkable against as instead
+            // of being a claim in a comment.
+            { CodeBuffer b; emit_and_reg_reg64(b, rd, rs); line("and " + D + ", " + S, b); }
+            { CodeBuffer b; emit_or_reg_reg64(b, rd, rs); line("or " + D + ", " + S, b); }
+            { CodeBuffer b; emit_xor_reg_reg64(b, rd, rs); line("xor " + D + ", " + S, b); }
+            { CodeBuffer b; emit_and_reg_reg(b, rd, rs);
+              line(std::string("and ") + R32[d] + ", " + R32[s], b); }
             { CodeBuffer b; emit_movzx_reg_reg8(b, rd, rs);
               line("movzx " + D + ", " + R8B[s], b); }
             for (auto v : imul_imms) {

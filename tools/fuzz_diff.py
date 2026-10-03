@@ -34,13 +34,9 @@ AOT is not compared here: no AOT binary emitter exists in this repo yet
 compares the two engines that actually exist. Extend CONFIGS/engines here
 once a third one does.
 
-Bitwise operators (&, |, ^, <<, >>) are NOT generated: the frontend has no
-support for them at all yet (only `and`/`or`/`not`, which are boolean, not
-bitwise) -- see src/frontend/frontend.py. That is a real language gap, not
-a fuzzer limitation; this tool can start covering them the day they exist.
-
     tools/fuzz_diff.py --floats          # float programs: arithmetic, compares, printing
     tools/fuzz_diff.py --mod             # integer modulo: powers of two, idiv, zero divisor
+    tools/fuzz_diff.py --bitwise         # & | ^ << >>: both encodings, count bounds, RCX hazard
 
 --floats is a separate mode rather than a tweak to the int generators because
 the int generators annotate every variable int[64], and a float cannot be
@@ -69,6 +65,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UNROLL_DIAMONDS = False
+ACCUM_UNROLL = False
+# --phi: run the JIT twice, with and without the SSA pipeline, and require both
+# to match the interpreter. The plain run is the control: it proves the pipeline
+# did not change the answer, rather than only proving the pipeline agrees with
+# the interpreter on some other program's terms.
+SSA_MODE = False
 FRONTEND = ROOT / "src" / "frontend" / "frontend.py"
 HELLO = ROOT / "build" / "hello"
 TIER_RUNNER = ROOT / "build" / "tier_runner"
@@ -483,6 +485,278 @@ class Gen:
         self.emit(0, f"print({acc})")
         return "\n".join(self.lines) + "\n"
 
+    def program_bitwise(self):
+        """Bitwise and shift-focused programs.
+
+        A separate mode for the same reason --mod is: the interesting shapes
+        are operand forms the general generator never produces, and folding
+        them into expr() would make every unrelated seed dilute them.
+
+        What this is really reaching for, in order of how badly it has gone:
+
+          * A shift result landing in RCX. RCX is a member of kTempPool on
+            POSIX, so the allocator can pick it as a shift's destination, and
+            `shl rcx, cl` would shift a register by its own low bits. The
+            result has to be computed elsewhere and moved into RCX *after* the
+            pop that restores the count. Two count variables plus an
+            intervening print is the shape that actually produced that
+            allocation.
+          * Values live across a call. Every print below sits between
+            statements on purpose, so a shift result has to survive being
+            spilled or promoted while something else is live.
+          * Both encodings, selected by whether the count is a literal or a
+            variable. Literal counts in {1} and {small} pick the D1 and C1
+            immediate forms; variable counts pick the D3/CL form.
+          * The count bounds check itself, in both directions: 0 and 63 must
+            work, and anything outside must trap identically on both engines.
+
+        Keeping the CPython oracle usable is a design constraint, not an
+        afterthought. `&`, `|`, `^` and `>>` agree with CPython for every
+        int64 value -- they are width-preserving, and Python's `>>` floors
+        toward negative infinity exactly like `sar`. Only `<<` can disagree,
+        by wrapping where Python grows. So every left shift here is bounded so
+        its result fits in int64, and the deliberate disagreements are left to
+        tests/programs/bitwise_wrap.py. Without that care every generated
+        program containing a shift would report interp_vs_cpython and the mode
+        would be useless as a CI gate.
+        """
+        self.lines = []
+        self.declared = set()
+
+        # Bit patterns worth hitting: single bits, byte boundaries, all-ones,
+        # and the sign bit. Negatives matter as much as positives because
+        # &, |, ^ are two's complement and `>>` is arithmetic.
+        PATTERNS = [0, 1, 2, 3, 5, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128,
+                    255, 256, 1023, 65535, -1, -2, -8, -127, -255, -256]
+        # Left-shift counts: small enough that PATTERNS_MAX << 8 still fits in
+        # int64, so CPython and Lithon cannot diverge on the result.
+        SHIFT_COUNTS = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        # Right-shift counts and bitwise counts have no such constraint.
+        WIDE_COUNTS = [0, 1, 2, 7, 8, 31, 32, 61, 62, 63]
+        # Counts that must trap at run time. These can only arrive through a
+        # variable, never as a literal: a literal out-of-range count is a
+        # compile-time RCR error, the frontend refuses the whole program, and
+        # the fuzzer skips it without ever comparing the two engines. Holding
+        # the bad value in a variable is what turns it into the runtime trap
+        # this mode exists to fuzz.
+        TRAP_COUNTS = [64, 65, 100, 1000, -1, -100]
+
+        def operand():
+            if self.declared and self.r.random() < 0.65:
+                return self.r.choice(sorted(self.declared))
+            return str(self.r.choice(PATTERNS))
+
+        def small_count():
+            """A count expression guaranteed to be in 0..8.
+
+            Only k1/k2 or a literal -- NOT any declared variable. The value
+            variables hold PATTERNS, which include 63 and 255; using one as a
+            count is exactly the int64-overflowing left shift this mode is
+            trying to keep out of the CPython comparison.
+
+            A declared variable rather than a literal, because the variable
+            form is the one that takes the D3/CL path where the RCX hazard
+            lives; the literal immediate forms get their own shapes below.
+            """
+            return self.r.choice([k1, k2, str(self.r.choice(SHIFT_COUNTS))])
+
+        def wide_count():
+            return str(self.r.choice(WIDE_COUNTS))
+
+        # Two count variables up front, so a body can hold two live shift
+        # counts at once. That is what forces the allocator to pick a
+        # destination other than the obvious scratch.
+        k1 = self.fresh_var()
+        k2 = self.fresh_var(exclude={k1})
+        self.declare(0, k1, str(self.r.choice(SHIFT_COUNTS)))
+        self.declare(0, k2, str(self.r.choice(SHIFT_COUNTS)))
+        # Two value variables, so operands are not always constants and the
+        # load/shift/store path is reached as well as the const one.
+        x = self.fresh_var(exclude={k1, k2})
+        y = self.fresh_var(exclude={k1, k2, x})
+        self.declare(0, x, str(self.r.choice(PATTERNS)))
+        self.declare(0, y, str(self.r.choice(PATTERNS)))
+
+        for _ in range(self.r.randint(5, 12)):
+            shape = self.r.random()
+            if shape < 0.18:
+                self.emit(0, f"print({operand()} & {operand()})")
+            elif shape < 0.32:
+                self.emit(0, f"print({operand()} | {operand()})")
+            elif shape < 0.46:
+                self.emit(0, f"print({operand()} ^ {operand()})")
+            elif shape < 0.58:
+                # Right shift, wide count: always agrees with CPython, so this
+                # is the shape that can use the whole 0..63 range.
+                self.emit(0, f"print({operand()} >> {self.r.choice([wide_count(), k1, k2])})")
+            elif shape < 0.70:
+                # Left shift, bounded count so int64 cannot overflow.
+                self.emit(0, f"print({operand()} << {self.r.choice([small_count(), k1, k2])})")
+            elif shape < 0.80:
+                # Augmented forms: these lower through a store, so the result
+                # has to survive a variable write and the following read.
+                tgt = self.r.choice([v for v in (x, y) if v in self.declared])
+                op = self.r.choice(["&=", "|=", "^=", ">>=", "<<="])
+                rhs = operand() if op in ("&=", "|=", "^=") else \
+                    (wide_count() if op == ">>=" else small_count())
+                self.emit(0, f"{tgt} {op} {rhs}")
+                # The print here is deliberate: it is what makes the stored
+                # value live across a call.
+                self.emit(0, f"print({tgt})")
+            elif shape < 0.88:
+                # Two shifts back to back, results stored. This is the exact
+                # shape of the RCX-destination bug: the first shift's result
+                # was allocated to RCX and the second shift's count check
+                # clobbered it.
+                self.emit(0, f"{x} = {operand()} << {small_count()}")
+                self.emit(0, f"{y} = {operand()} >> {wide_count()}")
+                self.emit(0, f"print({x})")
+                self.emit(0, f"print({y})")
+            elif shape < 0.94:
+                # Nested, so a shift feeds another expression rather than
+                # going straight to a print.
+                self.emit(0, f"print(({operand()} >> {wide_count()}) & {operand()})")
+                self.emit(0, f"print(({operand()} << {small_count()}) ^ {operand()})")
+            else:
+                # A counted loop, so the unroller and the loop passes see
+                # shifts rather than only straight-line code. The mask at the
+                # end of the body keeps acc bounded no matter what the body
+                # does to it, which is what stops `<<` from overflowing int64
+                # and making the CPython oracle useless.
+                iv = self.r.choice([v for v in LOOPVARS if v not in self.declared])
+                self.emit(0, f"{iv}: int[64] = 0")
+                n = self.r.randint(1, 6)
+                self.emit(0, f"for {iv} in range({n}):")
+                body = self.r.random()
+                if body < 0.4:
+                    self.emit(1, f"{x} = ({x} + {operand()}) & 255")
+                elif body < 0.7:
+                    self.emit(1, f"{x} = ({x} << {small_count()}) & 255")
+                else:
+                    self.emit(1, f"{x} = ({x} >> {wide_count()}) & 255")
+                self.emit(0, f"print({x})")
+
+        # Optionally end with a runtime shift trap. This is deliberately last:
+        # the trap aborts the process, so anything after it would never run and
+        # would silently shrink the coverage of this program. Both engines must
+        # agree that it trapped, with the same operator, and evaluate() treats
+        # that as a result rather than a CPython language gap.
+        if self.r.random() < 0.5:
+            self.emit(0, f"{k1} = {self.r.choice(TRAP_COUNTS)}")
+            self.emit(0, f"print({operand()} {self.r.choice(['<<', '>>'])} {k1})")
+        return "\n".join(self.lines) + "\n"
+
+    def program_phi(self):
+        """Merge-focused programs: conditional expressions, run through --ssa.
+
+        A conditional expression is the one program shape that *only* SSA can
+        express well. `a if c else b` needs a value defined on both arms and
+        read at the join, which is a Phi in every compiler; here it is a
+        temporary variable that the SSA pipeline promotes, and Mem2Reg's
+        promotion rule, the phi placement, the copy resolution, and the
+        register allocator all have to be right for the printed answer to
+        match the interpreter's.
+
+        What this reaches for, in order of how badly it has gone:
+
+          * Merges nested in merges. The outer arm's value is itself a merge,
+            so the inner one has to be resolved before the outer reads it and
+            the block ordering has to survive the resolution.
+          * Merges inside loops, so a promoted value crosses a back edge as
+            well as a join -- the loop-header phi, whose incoming operand for
+            the first iteration comes from outside the loop.
+          * Merges over floats. A promoted value's *type* matters, not just
+            its id: a phi that is silently treated as an integer prints
+            nonsense. Float literals are kept to small decimals so the CPython
+            oracle stays usable (see program_bitwise on why that matters).
+          * Merges as the right-hand side of an assignment, so the merge block
+            has to be closed correctly before the store is emitted into it.
+
+        Merges whose two arms are *different* types are deliberately not
+        generated: V1_SPEC is statically typed and the checker rejects them
+        (correctly) with "type of '__ifexprN' disagrees across branches", so
+        they would only ever be skipped. The type-per-merge case that matters
+        is already covered by running this generator in both int and float
+        mode -- the same program shape, two different inferred kinds.
+
+        Every value printed is also compared against CPython, so a merge that
+        picks the wrong arm is a mismatch rather than a silently wrong
+        program.
+        """
+        self.lines = []
+        self.declared = set()
+        self.float_declared = set()
+
+        def int_atom():
+            if self.declared and self.r.random() < 0.7:
+                return self.r.choice(sorted(self.declared))
+            return str(self.r.randint(0, 9))
+
+        def float_atom():
+            # Small decimals only: exact in binary, so the printed text is
+            # identical in both engines and a mismatch means a real bug rather
+            # than a rounding difference in the round-trip formatter.
+            if self.float_declared and self.r.random() < 0.6:
+                return self.r.choice(sorted(self.float_declared))
+            return self.r.choice(["0.0", "0.5", "1.0", "1.5", "2.5", "3.5",
+                                  "-1.5", "7.0", "10.25"])
+
+        def arith(depth=0):
+            atom = float_atom() if self.floats else int_atom()
+            if depth >= 1 or self.r.random() < 0.5:
+                return atom
+            return f"{atom} {self.r.choice(['+', '-'])} {arith(depth + 1)}"
+
+        def condition():
+            return f"{arith(1)} {self.r.choice(['<', '>', '=='])} {arith(1)}"
+
+        def merge(depth=0):
+            if depth < 2 and self.r.random() < 0.25:
+                return f"{merge(depth + 1)} if {condition()} else {merge(depth + 1)}"
+            return f"{arith(1)} if {condition()} else {arith(1)}"
+
+        if self.floats:
+            a, b = "f", "g"
+            self.emit(0, f"{a}: float[64] = {float_atom()}")
+            self.emit(0, f"{b}: float[64] = {float_atom()}")
+            self.declared = {a, b}
+            self.float_declared = {a, b}
+        else:
+            a, b = VARS[0], VARS[1]
+            self.declare(0, a, "0")
+            self.declare(0, b, "1")
+            self.declared = {a, b}
+
+        self.emit(0, f"print({merge()})")
+
+        # A merge as a call argument: the merge block has to be finished before
+        # the call is emitted into it.
+        if self.r.random() < 0.5:
+            m = self.fresh_var(exclude={a, b})
+            kind = "float[64]" if self.floats else "int[64]"
+            # Built before m joins the pool: a declaration's own initialiser
+            # cannot read the variable it declares, and the checker is right to
+            # reject that (0.6.10).
+            self.emit(0, f"{m}: {kind} = {a} + ({merge()})")
+            if self.floats:
+                self.float_declared.add(m)
+            else:
+                self.declared.add(m)
+
+        # Merges across a back edge, in a loop whose trip count is small and
+        # non-trivial (0 and 1 exercise the "never taken" and "taken once"
+        # header phis).
+        n = self.r.choice([1, 2, 3, 4, 5])
+        acc = self.fresh_var(exclude={a, b})
+        self.emit(0, f"{acc}: int[64] = 0")
+        iv = LOOPVARS[0]
+        self.emit(0, f"{iv}: int[64] = 0")
+        self.emit(0, f"for {iv} in range({n}):")
+        self.emit(1, f"{acc} = {acc} + 1")
+        self.emit(1, f"{acc} = {acc} + (1 if {condition()} else -1)")
+        self.emit(0, f"print({acc})")
+        return "\n".join(self.lines) + "\n"
+
     def program(self):
         call_expr = self.emit_recursive_helper() if self.r.random() < 0.5 else None
         for v in VARS[:3]:
@@ -531,11 +805,20 @@ def evaluate(py_path: Path, tmp_ir: Path):
     # The two are kept as separate strings on purpose: the interpreter spells
     # them differently and run_tier_diff.py diffs stderr byte-for-byte, so a
     # single combined substring would still catch both.
+    #
+    # An out-of-range shift count is the same kind of result for a different
+    # reason. x86 masks the count to its low 6 bits, so `1 << 64` would
+    # silently execute as a shift by 0 and `1 << -1` as a shift by 63; Lithon
+    # traps instead of returning the wrong answer. The trap is part of the
+    # language, so a program that hits it is a result to compare between the
+    # two engines, not a rejection to skip and not a language gap to report.
     interp_stderr = interp.stderr or ""
     is_div_trap = (interp.returncode == 1
                    and ("division by zero" in interp_stderr
                         or "modulo by zero" in interp_stderr))
-    if interp.returncode not in (0, TIMEOUT_RC) and not is_div_trap:
+    is_shift_trap = (interp.returncode == 1
+                     and "shift count out of range" in interp_stderr)
+    if interp.returncode not in (0, TIMEOUT_RC) and not (is_div_trap or is_shift_trap):
         return Result(True, reason="skip")
 
     # The diamond unroller is off by default (it measured slower), so --diamond
@@ -543,7 +826,24 @@ def evaluate(py_path: Path, tmp_ir: Path):
     jit_args = [str(TIER_RUNNER), str(tmp_ir), "--auto"]
     if UNROLL_DIAMONDS:
         jit_args.append("--unroll-diamonds")
+    # Accumulator unrolling is off by default for the same reason diamond
+    # unrolling is: the fast path is the one production runs, so an opt-in
+    # transform needs an explicit mode or it never gets exercised. It matters
+    # more than usual here -- it REORDERS blocks (the jammed main loop is emitted
+    # after the remainder), which is precisely what a liveness model built on
+    # textual block ranges gets wrong, silently and only for float
+    # accumulators.
+    if ACCUM_UNROLL:
+        jit_args.append("--accum-unroll")
     jit = run(jit_args)
+    if SSA_MODE:
+        jit_ssa = run(jit_args + ["--ssa"])
+        # A crash in the pipeline is itself the finding, so compare it here
+        # rather than letting the CPython oracle explain it away.
+        if jit_ssa.returncode != jit.returncode or jit_ssa.stdout != jit.stdout:
+            return Result(False, interp.stdout, interp.returncode,
+                          jit_ssa.stdout, jit_ssa.returncode,
+                          cpy_out=None, cpy_rc=None, reason="jit_vs_interp")
     cpy = run([sys.executable, str(py_path)])
     seen = (interp.stdout, interp.returncode, jit.stdout, jit.returncode, cpy.stdout, cpy.returncode)
 
@@ -562,9 +862,14 @@ def evaluate(py_path: Path, tmp_ir: Path):
     #
     # The message text is compared too, not just its presence: a program that
     # traps on modulo in the interpreter must not appear as a division trap in
-    # the JIT, and the two spellings are the only way to tell them apart.
+    # the JIT, and the two spellings are the only way to tell them apart. The
+    # shift message is matched whole, operator included, for the same reason:
+    # `<<` and `>>` trap with different text and swapping them would be a bug
+    # this comparison exists to catch.
     def trap_text(stderr):
-        for m in ("modulo by zero", "division by zero"):
+        for m in ("modulo by zero", "division by zero",
+                  "shift count out of range 0..63 for `<<`",
+                  "shift count out of range 0..63 for `>>`"):
             if m in (stderr or ""):
                 return m
         return None
@@ -576,7 +881,14 @@ def evaluate(py_path: Path, tmp_ir: Path):
             return Result(False, *seen, reason="jit_vs_interp")
 
     # 2. SECONDARY: what they agree on must match CPython (a language-semantics gap, not a JIT bug).
-    if cpy.returncode == 0:
+    #
+    # An out-of-range shift is exempt. CPython has no such rule -- `1 << 64` is
+    # a perfectly good 65-bit number there -- so CPython exits 0 with output
+    # where Lithon exits 1 with none, and comparing them would report every
+    # single generated trap as a "language gap" and bury the real findings.
+    # The primary JIT-vs-interpreter agreement above, including that both
+    # engines trap with the same operator, is still enforced in full.
+    if cpy.returncode == 0 and not (is_shift_trap and interp_trapped == jit_trapped):
         if interp.returncode == TIMEOUT_RC:
             return Result(False, *seen, reason="hang_vs_cpython")   # Lithon never finishes; CPython does
         if cpy.stdout != interp.stdout:
@@ -639,6 +951,8 @@ def main():
                     help="use the small strength-reduction-focused generator (see Gen.program_lsr)")
     ap.add_argument("--no-diamond-unroll", action="store_true",
                     help="do not pass --unroll-diamonds to tier_runner (used by --diamond)")
+    ap.add_argument("--accum", action="store_true",
+                    help="run the JIT with --accum-unroll (float accumulator splitting)")
     ap.add_argument("--diamond", action="store_true",
                     help="use the small if/else-diamond-focused generator (see Gen.program_diamond)")
     ap.add_argument("--shared-loop-vars", action="store_true",
@@ -648,13 +962,20 @@ def main():
                     help="generate flat float programs (arithmetic, comparisons, printing, int/float mixing)")
     ap.add_argument("--mod", action="store_true",
                     help="use the modulo-focused generator (see Gen.program_mod)")
+    ap.add_argument("--bitwise", action="store_true",
+                    help="use the bitwise/shift-focused generator (see Gen.program_bitwise)")
     ap.add_argument("--mod-negatives", action="store_true",
                     help="let --mod generate negative dividends, where C's truncating %% and Python's "
                          "floored %% disagree; the CPython oracle then reports the known language gap")
+    ap.add_argument("--phi", action="store_true",
+                    help="use the merge-focused generator (see Gen.program_phi) and compare the JIT "
+                         "with and without the SSA pipeline against the interpreter")
     args = ap.parse_args()
     TIMEOUT = args.timeout
-    global UNROLL_DIAMONDS
+    global UNROLL_DIAMONDS, SSA_MODE, ACCUM_UNROLL
     UNROLL_DIAMONDS = args.diamond and not args.no_diamond_unroll
+    ACCUM_UNROLL = args.accum
+    SSA_MODE = args.phi
 
     for exe, name in ((HELLO, "hello"), (TIER_RUNNER, "tier_runner")):
         if not exe.exists():
@@ -670,10 +991,14 @@ def main():
     for seed in range(args.seed, args.seed + args.count):
         gen = Gen(seed, args.shared_loop_vars, floats=args.floats,
                   mod_negatives=args.mod_negatives)
-        if args.floats:
+        if args.phi:
+            src = gen.program_phi()
+        elif args.floats:
             src = gen.float_program()
         elif args.mod:
             src = gen.program_mod()
+        elif args.bitwise:
+            src = gen.program_bitwise()
         elif args.diamond:
             src = gen.program_diamond()
         elif args.lsr:

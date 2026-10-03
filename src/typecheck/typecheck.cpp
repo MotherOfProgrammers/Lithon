@@ -29,6 +29,19 @@ std::pair<int64_t, int64_t> int_range(int width) {
     return {-half, half - 1};
 }
 
+// Renders a 128-bit value for an error message. std::to_string has no
+// __int128 overload (it is ambiguous between the signed/unsigned/long long
+// candidates), and the shift range check below can legitimately hold a value
+// outside int64 -- an int[8] shifted by 63 is a 71-bit magnitude.
+std::string wide_str(__int128 v) {
+    bool neg = v < 0;
+    unsigned __int128 m = neg ? (static_cast<unsigned __int128>(-(v + 1)) + 1)
+                              : static_cast<unsigned __int128>(v);
+    std::string s;
+    do { s.insert(s.begin(), static_cast<char>('0' + static_cast<int>(m % 10))); m /= 10; } while (m);
+    return neg ? "-" + s : s;
+}
+
 std::string type_str(const LType& t) {
     if (t.width < 0) return t.kind;
     return t.kind + "[" + std::to_string(t.width) + "]";
@@ -115,6 +128,13 @@ private:
                 }
             }
         }
+    }
+
+    // Temporary introduced by the frontend when a conditional expression has
+    // to be given a home in the IR. Kept in sync with IF_EXPR_TEMP in
+    // src/frontend/frontend.py, which mints the names.
+    static bool is_lowered_merge_temp(const std::string& name) {
+        return name.rfind("__ifexpr", 0) == 0;
     }
 
     std::unordered_set<const Instr*> find_loop_increment_stores() {
@@ -257,6 +277,36 @@ private:
                                   const std::string& context) {
         if (target.kind != "int") return;
         if (target.width >= 64) return;
+
+        // A left shift multiplies, so `x:int[8] = 100; x = x << 3` would put
+        // 800 in a variable whose declared range is -128..127. Since the
+        // shift count is a constant here, that is decidable now. __int128 is
+        // used for the intermediate because the widened result can leave
+        // int64 entirely (int[8] << 63), and clamping before the comparison
+        // would be exactly the kind of quiet wrong answer this pass exists
+        // to prevent.
+        if (binop_instr.op == Op::Shl) {
+            int64_t k_lo, k_hi;
+            if (!operand_range(binop_instr.args.at(1), k_lo, k_hi)) return;
+            if (k_lo < 0 || k_hi > 63) return;   // runtime traps; not ours to range-check
+            int64_t lo, hi;
+            if (!operand_range(binop_instr.args.at(0), lo, hi)) return;
+            // Shifting left magnifies, so the most negative corner is
+            // lo << k_hi and the most positive is hi << k_lo.
+            __int128 r_lo = static_cast<__int128>(lo) << k_hi;
+            __int128 r_hi = static_cast<__int128>(hi) << k_lo;
+            auto [target_lo, target_hi] = int_range(target.width);
+            if (r_lo < target_lo || r_hi > target_hi) {
+                error(context + ": type " + type_str(target) + " is not wide enough -- `x << " +
+                      std::to_string(k_lo) + "` can produce up to " +
+                      wide_str(r_hi) + ", which exceeds " + type_str(target) +
+                      "'s range " + std::to_string(target_lo) + ".." + std::to_string(target_hi) +
+                      ". Declare a wider type explicitly (V1_SPEC 0.5, 0.6.5) -- the compiler "
+                      "will not auto-widen it for you.");
+            }
+            return;
+        }
+
         if (binop_instr.op != Op::Add && binop_instr.op != Op::Sub && binop_instr.op != Op::Mul) return;
 
         int64_t lo1, hi1, lo2, hi2;
@@ -319,9 +369,16 @@ private:
             return;
         }
         if (const Instr* producer = find_producing_instr(id)) {
-            if (producer->op == Op::Add || producer->op == Op::Sub || producer->op == Op::Mul) {
+            if (producer->op == Op::Add || producer->op == Op::Sub || producer->op == Op::Mul
+                || producer->op == Op::Shl) {
                 check_binop_fits_target(*producer, target, context);
-                return;
+                // No return here. check_binop_fits_target answers "can the
+                // values this produces FIT the target", which is not the same
+                // question as "does the result's declared width fit". An int[64]
+                // result can be numerically small enough for int[16] and still
+                // be an illegal narrowing, and returning early skipped that
+                // check entirely, so `def f() -> int[16]: return 100 + 100`
+                // was accepted here while the Python checker rejected it.
             }
         }
         LType source;
@@ -413,10 +470,67 @@ private:
             case Op::And: case Op::Or: case Op::Not:
                 reg_types_[instr.result] = LType{"bool", -1};
                 return;
+            case Op::Shl: case Op::Shr:
+            case Op::BitAnd: case Op::BitOr: case Op::BitXor: {
+                // Integer-only, and the result mirrors the LEFT operand's
+                // width rather than the max of both like Add/Sub/Mul do.
+                //   band/bor/bxor: AND/OR/XOR can only CLEAR bits, so the
+                //     result is representable in either operand, and taking
+                //     the left one never narrows below a value that fits.
+                //   shl/shr:       the left operand is the value being scaled,
+                //     so its width is the floor. `x << k` can exceed it, and
+                //     that is caught separately -- by the literal-count range
+                //     check in check_binop_fits_target, or at runtime for a
+                //     dynamic count. Reporting the result as the left width
+                //     here is what makes that check reachable.
+                LType lhs, rhs;
+                if (!reg_type(instr.args.at(0), lhs) || !reg_type(instr.args.at(1), rhs)) return;
+                if (lhs.kind != "int" || rhs.kind != "int") {
+                    const LType& bad = lhs.kind != "int" ? lhs : rhs;
+                    error("bitwise operand has type " + type_str(bad) + " -- shl/shr/and/or/xor "
+                          "are integer-only; Lithon has no float bit pattern to reinterpret "
+                          "(V1_SPEC 0.6.11)");
+                    return;
+                }
+                if (instr.op == Op::Shl || instr.op == Op::Shr) {
+                    // The static half of the two-layer shift-count backstop.
+                    // x86 masks the count to 6 bits, so 64 would execute as 0
+                    // and return the unshifted value; and a negative count
+                    // would use the masked low bits. Neither is worth
+                    // executing when the answer is already known here. The
+                    // interpreter's apply_bitop re-checks this at runtime,
+                    // which is what covers a non-constant count.
+                    if (const Instr* c = find_producing_const(instr.args.at(1))) {
+                        if (c->int_imm < 0 || c->int_imm > 63) {
+                            error(std::string("shift count ") + std::to_string(c->int_imm) +
+                                  " is out of range 0..63 for `" +
+                                  (instr.op == Op::Shl ? "<<`" : ">>`") +
+                                  " -- the machine word is 64 bits and a count outside 0..63 "
+                                  "has no defined meaning (V1_SPEC 0.6.11)");
+                            return;
+                        }
+                    }
+                }
+                reg_types_[instr.result] = LType{"int", lhs.width};
+                return;
+            }
             case Op::Store: {
                 if (instr.type_kind.empty()) {
                     auto it = scope.find(instr.name);
                     if (it == scope.end()) {
+                        // A conditional expression lowers to a temporary that
+                        // both arms store and the join loads. The name is
+                        // generated by the frontend (see IRBuilder.build_expr
+                        // in src/frontend/frontend.py), carries no source
+                        // annotation because there is no source variable to
+                        // annotate, and its type is whatever the arms agree on
+                        // -- which merge_scopes below then checks, so an int
+                        // arm meeting a float arm is still an error.
+                        if (is_lowered_merge_temp(instr.name)) {
+                            LType v;
+                            if (reg_type(instr.args.at(0), v)) scope[instr.name] = v;
+                            return;
+                        }
                         error("'" + instr.name + "' is assigned without a type annotation "
                               "(V1_SPEC 0.6.1) -- write '" + instr.name + ": <type> = ...' first");
                         return;

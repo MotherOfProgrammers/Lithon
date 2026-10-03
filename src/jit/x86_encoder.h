@@ -270,7 +270,26 @@ enum class Cond : uint8_t {
     //   Above    = !CF && !ZF  (lhs > rhs)
     //   Parity   = PF   (set when the operands were unordered, i.e. NaN)
     //   NotParity = !PF
-    Below = 0x92, Above = 0x97, Parity = 0x9A, NotParity = 0x9B
+    Below = 0x92, Above = 0x97, Parity = 0x9A, NotParity = 0x9B,
+    // TRAP: this enum mixes two opcode spaces, and only the primary names
+    // above are in the Jcc space.
+    //
+    //   Less/GreaterEq/LessEq/Greater/Equal/NotEqual are Jcc opcodes
+    //     (0x8C = jl, 0x8F = jg, 0x84 = je, 0x85 = jne, ...) and
+    //     emit_jcc_rel32 uses them directly.
+    //   Below/Above/Parity/NotParity are SETcc opcodes, which are always
+    //     Jcc + 0x10 (0x92 = setb, 0x97 = seta, ...) because comisd and
+    //     ucomisd need a flag test as a byte, not a branch. They are ONLY
+    //     valid with emit_setcc.
+    //
+    // Handing a SETcc value to emit_jcc_rel32 does not fault. It encodes a
+    // completely different instruction: 0x97 as a Jcc byte is not `ja`, it is
+    // `seta m8` -- a store of one byte to a computed address, which silently
+    // corrupts memory. So the unsigned JUMP needed for a runtime range check
+    // gets its own explicitly Jcc-spaced name here, rather than borrowing
+    // Cond::Above and hoping.
+    JumpAbove = 0x87,   // ja: unsigned lhs > rhs. Jcc space. emit_jcc_rel32 only.
+    JumpBelowEq = 0x86, // jbe: unsigned lhs <= rhs. Jcc space. emit_jcc_rel32 only.
 };
 
 inline Cond invert(Cond c) {
@@ -357,10 +376,99 @@ inline void emit_epilogue(CodeBuffer& buf) {
 // and dst, src  (64-bit register to register)
 // Encoding: [REX] 21 /r   (AND r/m64, r64 -- src is the "reg" field,
 // dst is the "r/m" field). Matches emit_add_reg_reg / emit_sub_reg_reg.
+//
+// NOTE this is the only ALU reg-reg emitter here WITHOUT REX.W, i.e. it is a
+// 32-bit and that zero-extends into the high half. That is deliberate and
+// currently harmless: its only callers AND together two 0/1 booleans from
+// setcc, where dropping bits 32..63 changes nothing. It is NOT a general
+// 64-bit and -- do not reach for it from BitAnd, where a 32-bit and on
+// -1 & mask would return the mask instead of the real 64-bit result. Use
+// emit_and_reg_reg64.
 inline void emit_and_reg_reg(CodeBuffer& buf, Reg dst, Reg src) {
     if (reg_is_extended(dst) || reg_is_extended(src)) emit_u8(buf, rex(false, src, dst));
     emit_u8(buf, 0x21);
     emit_u8(buf, modrm_reg_reg(src, dst));
+}
+
+// ---- 64-bit bitwise ALU (REX.W set) ------------------------------------
+// These are the ones BitAnd/BitOr/BitXor use. REX.W is not optional: without
+// it the op is 32-bit and writes a zero-extended result, silently discarding
+// the high half of any negative operand.
+
+inline void emit_and_reg_reg64(CodeBuffer& buf, Reg dst, Reg src) {
+    emit_u8(buf, rex(true, src, dst));
+    emit_u8(buf, 0x21);
+    emit_u8(buf, modrm_reg_reg(src, dst));
+}
+
+// or dst, src  (64-bit). Encoding: REX.W + 09 /r.
+inline void emit_or_reg_reg64(CodeBuffer& buf, Reg dst, Reg src) {
+    emit_u8(buf, rex(true, src, dst));
+    emit_u8(buf, 0x09);
+    emit_u8(buf, modrm_reg_reg(src, dst));
+}
+
+// xor dst, src  (64-bit). Encoding: REX.W + 31 /r.
+inline void emit_xor_reg_reg64(CodeBuffer& buf, Reg dst, Reg src) {
+    emit_u8(buf, rex(true, src, dst));
+    emit_u8(buf, 0x31);
+    emit_u8(buf, modrm_reg_reg(src, dst));
+}
+
+// ---- shifts --------------------------------------------------------------
+// The group-1 shift immediates are /4 shl, /5 shr (LOGICAL), /7 sar
+// (arithmetic); /6 is undefined. The imm8 form is C1 /digit ib and the
+// variable form is D3 /digit, which reads the count from CL and takes no
+// immediate.
+//
+// The imm8 form is worth having: it encodes the count in the instruction
+// itself, so a literal shift needs no scratch register, no move into CL, and
+// no save/restore around it. The D3 form is the only option for a count that
+// is not known at compile time, and it is the one that requires RCX to be
+// preserved by the caller -- there is no encoding of a variable shift that
+// uses any other register.
+
+inline void emit_shl_reg_imm8(CodeBuffer& buf, Reg dst, uint8_t imm) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xC1);
+    emit_u8(buf, static_cast<uint8_t>(0xE0 | reg_low3(dst)));
+    emit_u8(buf, imm);
+}
+
+// shl dst, 1  -- the D1 /4 short form, two bytes shorter than C1 /4 ib 01.
+// Worth having because `x << 1` is one of the most common shifts there is.
+// GNU as picks this form itself, which is what the encoder-vs-as cross-check
+// notices when the C1 form is used for a count of 1.
+inline void emit_shl_reg_1(CodeBuffer& buf, Reg dst) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xD1);
+    emit_u8(buf, static_cast<uint8_t>(0xE0 | reg_low3(dst)));
+}
+
+inline void emit_sar_reg_1(CodeBuffer& buf, Reg dst) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xD1);
+    emit_u8(buf, static_cast<uint8_t>(0xF8 | reg_low3(dst)));
+}
+
+// NOTE there is deliberately no emit_shr_reg_imm8 here. The /5 form is a
+// LOGICAL shift and Python's >> is arithmetic, so emitting /5 for `>>` is
+// simply the wrong instruction: -8 >> 1 would be 0x7FFFFFFFFFFFFFFC instead of
+// -4. `>>` uses the existing emit_sar_reg_imm8 above (/7).
+
+// shl dst, cl  (count in CL). Encoding: REX.W + D3 /4. RCX is an implicit
+// operand here, so the caller owns preserving it.
+inline void emit_shl_reg_cl(CodeBuffer& buf, Reg dst) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xD3);
+    emit_u8(buf, static_cast<uint8_t>(0xE0 | reg_low3(dst)));
+}
+
+// sar dst, cl  (arithmetic, sign-propagating). Encoding: REX.W + D3 /7.
+inline void emit_sar_reg_cl(CodeBuffer& buf, Reg dst) {
+    emit_u8(buf, rex(true, Reg::RAX, dst));
+    emit_u8(buf, 0xD3);
+    emit_u8(buf, static_cast<uint8_t>(0xF8 | reg_low3(dst)));
 }
 
 // setcc_opcode -- the 0F 9x byte for a condition.

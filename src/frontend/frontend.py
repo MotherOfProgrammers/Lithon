@@ -16,7 +16,8 @@ Two modes, both supported by the same builder:
 Supports: assignment (typed and untyped), augmented assignment
 (+=, -=, *=, /= on a simple name), int/float/bool literals,
 +/-/*//, comparisons (single, non-chained), and/or (exactly two
-operands), not, print(), if/elif/else, while, for ... in range(...),
+operands), not, print(), if/elif/else, conditional expressions
+(`a if cond else b`), while, for ... in range(...),
 function calls, return.
 """
 import ast
@@ -73,6 +74,14 @@ def parse_type_annotation(node):
 ENTRY_POINT = "__main__"
 MANGLED_PREFIX = "user_"
 
+# Prefix for the temporary that holds the result of a conditional expression.
+# The IR text format has no phi opcode, so `a if c else b` needs a variable both
+# arms can store and the join can load. The name is compiler-generated, so no
+# source annotation can exist for it; the type checker recognises the prefix
+# and infers the type from the arms (is_lowered_merge_temp in
+# src/typecheck/typecheck.cpp), which is why the two spellings must agree.
+IF_EXPR_TEMP = "__ifexpr"
+
 # One table, used by both BinOp and AugAssign. It used to be duplicated as a
 # literal dict at each site, which is exactly the kind of drift that lets a
 # new operator work in `a + b` and silently fail in `a += b`.
@@ -88,12 +97,26 @@ BINARY_OPS = {
     ast.Mod: "mod",
 }
 
+# Bitwise/shift, kept out of BINARY_OPS on purpose. BINARY_OPS is the
+# promoting table: any int/float mix in it becomes a float. These operators are
+# integer-only and are a type error on floats, so sharing the table would make
+# `2.5 & 1` silently legal. The `b` prefixes keep them clear of the logical
+# `and`/`or` IR opcodes, which are different operations entirely.
+BITWISE_OPS = {
+    ast.LShift: "shl",
+    ast.RShift: "shr",
+    ast.BitAnd: "band",
+    ast.BitOr: "bor",
+    ast.BitXor: "bxor",
+}
+
 
 class IRBuilder:
     def __init__(self, fn_rename=None):
         self.fn_rename = fn_rename or {}
         self.reg_counter = 0
         self.block_counter = 0
+        self.ifexpr_counter = 0
         self.blocks = []
         self.current = None
 
@@ -140,8 +163,8 @@ class IRBuilder:
         if isinstance(node, ast.BinOp):
             left = self.build_expr(node.left)
             right = self.build_expr(node.right)
-            op_map = BINARY_OPS
             op_type = type(node.op)
+            op_map = BITWISE_OPS if op_type in BITWISE_OPS else BINARY_OPS
             if op_type not in op_map:
                 raise NotImplementedError(f"operator {op_type.__name__} not supported yet")
             r = self.new_reg()
@@ -214,6 +237,38 @@ class IRBuilder:
                 self.emit(f"{r} = call {callee}, {', '.join(arg_regs)}")
             else:
                 self.emit(f"{r} = call {callee}")
+            return r
+
+        if isinstance(node, ast.IfExp):
+            # `a if cond else b` as an expression. The IR text format has no
+            # phi opcode, so the value is given a temporary variable that both
+            # arms store and the merge block loads -- exactly the diamond that
+            # the dominance-frontier analysis sees as one Phi at the join.
+            # Nothing is forced through a stack slot it did not already need:
+            # the same shape is what a source-level merge would produce.
+            cond_reg = self.build_expr(node.test)
+            temp = f"{IF_EXPR_TEMP}{self.ifexpr_counter}"
+            self.ifexpr_counter += 1
+
+            then_label = self.reserve_label()
+            else_label = self.reserve_label()
+            merge_label = self.reserve_label()
+
+            self.emit(f"branch {cond_reg}, {then_label}, {else_label}")
+
+            self.start_block(then_label)
+            then_reg = self.build_expr(node.body)
+            self.emit(f"store {temp}, {then_reg}")
+            self.emit(f"jump {merge_label}")
+
+            self.start_block(else_label)
+            else_reg = self.build_expr(node.orelse)
+            self.emit(f"store {temp}, {else_reg}")
+            self.emit(f"jump {merge_label}")
+
+            self.start_block(merge_label)
+            r = self.new_reg()
+            self.emit(f"{r} = load {temp}")
             return r
 
         raise NotImplementedError(f"expression node {type(node).__name__} not supported yet")
@@ -337,7 +392,7 @@ class IRBuilder:
             # both execution tiers see one canonical shape.
             if not isinstance(node.target, ast.Name):
                 raise NotImplementedError("only simple name targets are supported for augmented assignment")
-            op_map = BINARY_OPS
+            op_map = BITWISE_OPS if type(node.op) in BITWISE_OPS else BINARY_OPS
             op_type = type(node.op)
             if op_type not in op_map:
                 raise NotImplementedError(f"augmented operator {op_type.__name__} not supported yet")
