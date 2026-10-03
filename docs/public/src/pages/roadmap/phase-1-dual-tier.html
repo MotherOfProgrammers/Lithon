@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="How a typed block of Python becomes x86-64 bytes: the two execution tiers, the emitter, ABI gating, the measured optimizer, and all eight SSA phases." />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Phase I · Dual-tier JIT | Lithon" />
+    <meta property="og:description" content="How a typed block of Python becomes x86-64 bytes: the two execution tiers, the emitter, ABI gating, the measured optimizer, and all eight SSA phases." />
+    <meta name="twitter:card" content="summary" />
+    <title>Phase I · Dual-tier JIT | Lithon</title>
+    <link rel="icon" href="../../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../../../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../../../fonts/fonts.css" />
+    <link rel="stylesheet" href="../../styles/base.css" />
+    <link rel="stylesheet" href="../../styles/pages/inner-pages.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body data-nav-section="roadmap">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="../../index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="../../index.html#engine">The engine</a>
+          <a href="../docs.html">Docs</a>
+          <a href="../use-cases.html">Use cases</a>
+          <a href="../roadmap.html" data-nav-section="roadmap">Roadmap</a>
+          <a href="../playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero">
+        <div class="container reveal">
+          <p class="section-kicker">Roadmap &middot; Phase I</p>
+          <h1>Two lanes,<br /><em>and a refusal.</em></h1>
+          <p class="page-hero-lede">
+            How a block of typed Python becomes x86-64 bytes, what the optimizer does to them on the way, and the eight SSA phases that turned a memory-based JIT into an SSA one.
+          </p>
+          <div class="page-hero-meta">
+            <span>In progress</span><span>25 of 26 opcodes</span><span>8 SSA phases</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-content container">
+        <div class="split-layout">
+          <aside class="side-index">
+            <p>On this page</p>
+            <a class="is-current" href="#tiers" aria-current="true">The two tiers</a>
+            <a href="#emitter">The emitter</a>
+            <a href="#abi">ABI &amp; gating</a>
+            <a href="#optimizer">The optimizer</a>
+            <a href="#ssa">SSA, phase by phase</a>
+            <a href="#load-bearing">Two load-bearing calls</a>
+            <a href="#owed">What Phase I owes</a>
+          </aside>
+
+          <div class="content-column">
+            <div class="doc-block reveal" id="tiers">
+              <h2 style="margin: 0 0 22px">Two lanes,<br /><span>and a refusal.</span></h2>
+              <p>
+                Lithon runs the same program on two engines. A block whose types can be established before execution is
+                compiled straight to x86-64 and called through a function pointer. A block that cannot be established runs
+                on the Tier-0 C++ interpreter instead of guessing.
+              </p>
+              <p>
+                The refusal is the feature. <code>--strict</code> turns the fallback into a hard error, which is what
+                makes the tier line in the output worth reading: a clean exit under <code>--strict</code> is proof the
+                bytes were really emitted and really ran, whereas <code>--auto</code> can hide a total fallback behind
+                output that happens to look right.
+              </p>
+              <div class="info-grid">
+                <article class="info-tile">
+                  <strong>Tier 0 · interpreter</strong>
+                  <p>C++ execution of the IR. Always available, never assumed correct enough to be measured against.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Tier 1 · native</strong>
+                  <p>Guard-free machine code in executable memory. No dispatch, no boxing, no interpreter frame.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>The gate</strong>
+                  <p>A printed value whose type is not provably static falls to Tier-0 rather than being emitted.</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="emitter">
+              <h3><span>01</span>The emitter and executable memory</h3>
+              <p>
+                The backend is a hand-rolled x86-64 encoder in C++20. There is no LLVM and no Cranelift: every opcode is
+                written byte by byte, and the encodings are checked against GNU <code>as</code> rather than trusted,
+                because an encoder that is subtly wrong produces plausible-looking disassembly.
+              </p>
+              <p>
+                Emitted code is written into memory the operating system marked executable — <code>mmap</code> with
+                <code>PROT_READ | PROT_EXEC</code> on Linux, <code>VirtualAlloc</code> on Windows — and entered through a
+                function pointer. Nothing about that requires a runtime library, which is where the zero-dependency claim
+                comes from: the engine's <em>inputs</em> are a compiler and a text file, and its output is bytes the CPU
+                already knows how to run.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>read the generated code</span></div>
+                <pre><span class="accent">$</span> ./build/lithon_jit nested_loop.ir --dump-code /tmp/n.bin
+<span class="accent">$</span> objdump -D -b binary -mi386:x86-64 -M intel /tmp/n.bin
+
+<span class="muted"># Did strength reduction fire? nested_loop has one multiply</span>
+<span class="muted"># per inner iteration, so zero imul means it did.</span>
+<span class="accent">$</span> objdump -D -b binary -mi386:x86-64 -M intel /tmp/n.bin | grep -c imul
+0</pre>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="abi">
+              <h3><span>02</span>ABI and target-feature gating</h3>
+              <p>
+                Emitted functions have to be callable by ordinary C code, which means SysV and Win64 both have to be
+                right about callee-saved registers and stack alignment. The audit does not read the emitter to decide
+                this — it disassembles every emitted function and checks alignment at each call and return.
+              </p>
+              <p>
+                On the same principle, CPU feature detection is cross-checked against the kernel rather than trusted to
+                CPUID alone. That gate is what will make an AVX2 path safe to add later, and the VEX transition scanner
+                is already in place to catch an AVX emission that forgets <code>vzeroupper</code>.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>SysV x64 ABI</dt><dd>shipped &amp; audited</dd></div>
+                <div class="spec-line"><dt>Win64 ABI</dt><dd class="no">implemented, not yet verified on a Windows host</dd></div>
+                <div class="spec-line"><dt>CPUID vs kernel</dt><dd>cross-checked, 30 assertions</dd></div>
+                <div class="spec-line"><dt>AVX / AVX-512 gate</dt><dd>shipped as a guardrail</dd></div>
+                <div class="spec-line"><dt>AVX emitted today</dt><dd class="no">none</dd></div>
+              </dl>
+              <div class="note">
+                <strong>Why the Win64 row is not ticked</strong>
+                <p>
+                  The code path exists behind <code>#if defined(_WIN32)</code>, but the audit only exercises whichever ABI
+                  the host uses. On a Linux machine that means the Win64 path has been compiled and never checked, so
+                  listing it as shipped would be a claim no test supports.
+                </p>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="optimizer">
+              <h3><span>03</span>The optimizer, measured one pass at a time</h3>
+              <p>
+                Every optimization is independently switchable, so its effect can be measured rather than assumed. The
+                numbers below are from an Intel i3-3110M, twelve interleaved rounds on the CPU-time clock with one core
+                pinned — and differences under about five percent on a shared machine are not meaningful.
+              </p>
+              <div class="data-wrap">
+                <table class="data-table">
+                  <caption>Optimization pipeline · isolated against HEAD</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Change</th>
+                      <th scope="col">Lives in</th>
+                      <th scope="col">Effect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Strength-reduced multiplies</th>
+                      <td><code>optimize.h</code></td>
+                      <td class="measure">nested 1.062&times;</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Accumulator unroll <span class="no">(opt-in)</span></th>
+                      <td><code>optimize.h</code></td>
+                      <td class="measure">float reduction 1.58&times; &middot; 95.8 &rarr; 60.5 ms</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Callee-saved borrowing</th>
+                      <td><code>register_alloc.h</code></td>
+                      <td class="measure">fib 1.063&times;</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Mem2Reg + SSA copy resolution</th>
+                      <td><code>ssa.h</code></td>
+                      <td>29 loads &middot; 20 stores removed</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Constant folding, dead code, self tail calls</th>
+                      <td><code>optimize.h</code></td>
+                      <td class="no">bundled, not isolated</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Diamond unrolling <span class="no">(opt-in)</span></th>
+                      <td><code>optimize.h</code></td>
+                      <td class="no">1.10&times; slower, kept behind a flag</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                Two of those rows are opt-in for a reason rather than by caution. Accumulator splitting reassociates a
+                float reduction, so the native value stops being bit-identical to the interpreter's &mdash; correct, but a
+                different answer in the last bits, which the tier-diff gate would (correctly) flag. Diamond unrolling is
+                implemented, correct and fuzzed, and measured <em>slower</em>: a diamond's if/else test is irreducible, so
+                unrolling only inflates the loop. It stays behind <code>--unroll-diamonds</code> instead of being deleted,
+                because the measurement is about this shape and not about the pass.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="ssa">
+              <h3><span>04</span>The SSA pipeline, phase by phase</h3>
+              <p>
+                The memory-based JIT is being converted to SSA one phase at a time, each independently switchable. The IR
+                keeps mutable variables in memory &mdash; a variable is written by a <code>Store</code> and read by a
+                <code>Load</code>, exactly like a spill slot &mdash; so promotion here means turning those into values
+                that live in registers.
+              </p>
+              <div class="data-wrap">
+                <table class="data-table">
+                  <caption>Shipped phases</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Phase</th>
+                      <th scope="col">What it adds</th>
+                      <th scope="col">Lives in</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">2.1</th>
+                      <td>CFG, Cooper-Harvey-Kennedy dominators, natural loops, preheaders, latches, exits</td>
+                      <td><code>loop_info.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.2</th>
+                      <td>Phi placement by iterated dominance frontier over each variable&rsquo;s def blocks</td>
+                      <td><code>ssa.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.3</th>
+                      <td>Mem2Reg &mdash; promote what is promotable, place its phis, rewrite the loads and stores away</td>
+                      <td><code>ssa.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.4</th>
+                      <td>SSA copy propagation and dead-value elimination, then <code>resolve_phis()</code></td>
+                      <td><code>optimize.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.5</th>
+                      <td>Phi copies as register moves instead of a memory round-trip</td>
+                      <td><code>register_alloc.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.6</th>
+                      <td>Dedicated loop-exit blocks, synthesized only where the exit edge is genuinely shared</td>
+                      <td><code>loop_info.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.7</th>
+                      <td>CFG liveness and interference-graph allocation, replacing the flat instruction-span model</td>
+                      <td><code>liveness.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.8</th>
+                      <td>Register coalescing &mdash; a merge&rsquo;s destination adopts its source&rsquo;s dead register</td>
+                      <td>both halves</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                Phase 2.8 is the one with an honest size attached to it: it deletes <strong>five</strong> merges across the
+                typed regression corpus. That is not a disappointing result so much as an accurate one. Mem2Reg runs first,
+                so a merge&rsquo;s arms are already SSA values, and the ones that arrive are constants, another merge&rsquo;s
+                value, or an arithmetic result still live somewhere else. A constant has no register to adopt, a
+                merge&rsquo;s value would mean relocating a whole merge, and the third case is refused outright.
+              </p>
+              <p>
+                The guard that makes it safe is a single comparison: <code>last_use == the store</code>&rsquo;s index means
+                the source is dead the instant the copy retires, so the merge itself is the only thing left wanting the
+                register. Four conditions back it up &mdash; the source must be a real register, the merge must not
+                outlive a call unless the register is callee-saved, no other value&rsquo;s range may touch the merge&rsquo;s
+                extent, and two merges may not claim one register. <code>phi_register_test</code> pins all three shapes: a
+                dead arithmetic source coalesces, a source read again after the join does not, and constants do not.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>--stats · where the merges went</span></div>
+                <pre><span class="accent">$</span> ./build/tier_runner prog.ir --auto --stats
+phi copies: <span class="accent">5 of 9</span> in registers</pre>
+              </div>
+              <p>
+                A shortfall there is the register budget, not a defect. A Phi copy gets a callee-saved register, of which
+                there are five, and real variables rank for them first by loop-depth weight &mdash; so a merge-heavy
+                program gets every copy in a register, while a function with more merges than registers keeps the memory
+                path for the remainder. Still correct, just not yet free.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="load-bearing">
+              <h3><span>05</span>Two decisions that are load-bearing</h3>
+              <p>
+                Two choices in that sequence look like details until they produce wrong answers. Both are recorded here
+                because the reasoning is the thing a future contributor needs, not the outcome.
+              </p>
+              <div class="note">
+                <strong>Promotion is gated on a must-analysis that iterates downward</strong>
+                <p>
+                  A variable is promoted only if it is <em>definitely assigned</em> at every load and on every planned
+                  Phi&rsquo;s incoming edge. The dataflow meets over predecessors by intersection and iterates <em>down
+                  from &ldquo;everything&rdquo;</em>, which converges on the greatest fixpoint.
+                </p>
+                <p>
+                  That is not a stylistic choice. Iterating upward from nothing, a variable assigned in a preheader and
+                  read inside the loop collapses at the header to the meet of <code>{preheader}</code> and
+                  <code>{back edge}</code>; the back-edge set never picks it up, and ordinary loop accumulators become
+                  silently un-promotable forever. Anything the analysis cannot prove stays in memory, and
+                  <code>vars_declined</code> reports it rather than letting it pass unnoticed.
+                </p>
+              </div>
+              <div class="note">
+                <strong><code>resolve_phis()</code> is a lowerer, not an emitter</strong>
+                <p>
+                  No codegen path emits <code>Op::Phi</code>, so resolution stores each incoming value on its predecessor
+                  <em>edge</em> and turns the Phi into a load. That is what makes conditional expressions work today, and
+                  it is correct &mdash; <code>--ssa</code> is differential-fuzzed against the interpreter &mdash; but the
+                  merged value still round-trips through memory.
+                </p>
+                <p>
+                  There is a related subtlety in the liveness that feeds it. A merge&rsquo;s operands are live on an
+                  <em>edge</em>, which block-granular liveness has no term for: the operand is read at the instant the
+                  predecessor&rsquo;s branch is taken, later than every ordinary use in that block. Filing it as a use of
+                  the join is wrong in both directions at once &mdash; it stretches the value&rsquo;s range backwards across
+                  the whole join and never records that the value must survive to the end of the predecessor, so a value
+                  whose last real use precedes the branch can look dead, have its register reused by the very next
+                  instruction, and be read clobbered by the copy. <code>compute_edge_uses()</code> carries these
+                  per-edge instead, and <code>liveness_test</code> pins both halves: two operands sharing a predecessor
+                  do interfere, because both are needed at its end, while operands of different edges do not.
+                </p>
+              </div>
+              <p>
+                One older view has been deleted outright. <code>find_loops()</code> and <code>LoopSpan</code> approximated a
+                loop by the contiguous flat instruction span <code>[header, latch]</code>, which is a superset when the body
+                happens to be laid out contiguously and an <em>underset</em> when it is not &mdash; and the underset was
+                the dangerous direction, because <code>extend_across_loops()</code> then failed to carry a value across the
+                back edge past a body block the span missed, making a live value look dead. Phase 2.7 moved the allocator
+                onto real CFG dataflow in the same change that removed those consumers, so the imprecise view no longer
+                has any callers to be wrong for.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="owed">
+              <h3><span>06</span>What Phase I still owes</h3>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>IR opcodes emitted</dt><dd><code>25 of 26</code></dd></div>
+                <div class="spec-line"><dt><code>Phi</code></dt><dd class="no">lowered, not emitted</dd></div>
+                <div class="spec-line"><dt>arguments per function / call</dt><dd class="no">capped at 2</dd></div>
+                <div class="spec-line"><dt>float merges</dt><dd class="no">never promoted &middot; needs an XMM pool</dd></div>
+                <div class="spec-line"><dt>Win64 ABI</dt><dd class="no">no test evidence yet</dd></div>
+                <div class="spec-line"><dt>AVX emitted</dt><dd class="no">none &middot; gating only</dd></div>
+              </dl>
+              <p>
+                The <code>Phi</code> emitter is the one that matters, and it relocates work rather than shrinking it. The
+                liveness prerequisite has already landed in <code>compute_edge_uses()</code>. What is owed is value-kind
+                inference for a float merge, an allocator slot for the result, and codegen for the join&rsquo;s parallel
+                copies &mdash; and that last one is the same interference problem as phase 2.8, so it moves the coalescing
+                question rather than answering it.
+              </p>
+              <p>
+                A float merge is never promoted today, and for a structural reason rather than an oversight: a
+                general-purpose register cannot hold a double, so those copies stay in memory under the same rule that
+                governs every other float value. Closing it needs an XMM allocation pool.
+              </p>
+              <div class="subpage-nav">
+                <a href="phase-2-aot.html">
+                  <span>Next in the roadmap</span>
+                  <strong>Phase II &middot; AOT binary synthesis</strong>
+                </a>
+                <a href="../roadmap.html">
+                  <span>Back to</span>
+                  <strong>The full tracker</strong>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="../../index.html">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+    <script type="module" src="../../scripts/roadmap-page.js"></script>
+  </body>
+</html>

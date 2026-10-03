@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Lithon roadmap and evolution tracker | public milestones for the engine." />
+    <meta name="description" content="Lithon roadmap | Phase I dual-tier JIT, Phase II AOT binaries, Phase III systems and SIMD, with the test that enforces each claim." />
     <meta name="theme-color" content="#f8fff4" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Roadmap | Lithon" />
-    <meta property="og:description" content="Lithon evolves in public. Follow the movement from a sharp native core to a language and runtime more people can build with." />
+    <meta property="og:description" content="A JIT that refuses. A compiler that ships. Where Lithon stands, what is being built next, and the test that enforces each claim." />
     <meta name="twitter:card" content="summary" />
     <title>Roadmap | Lithon</title>
     <link rel="icon" href="../../icons/favicon.svg" type="image/svg+xml" />
@@ -15,6 +15,14 @@
     <link rel="stylesheet" href="../../fonts/fonts.css" />
     <link rel="stylesheet" href="../styles/base.css" />
     <link rel="stylesheet" href="../styles/pages/inner-pages.css" />
+    <noscript>
+      <style>
+        /* With no script there is no dialog to open, so each milestone's own
+           copy stays in the row. This lives here rather than behind a `.js`
+           class so a slow module never unpacks twenty-two paragraphs mid-read. */
+        .milestone-detail { display: block; }
+      </style>
+    </noscript>
     <script>
       (function () {
         var root = document.documentElement;
@@ -58,7 +66,7 @@
           <a href="../index.html#engine">The engine</a>
           <a href="docs.html">Docs</a>
           <a href="use-cases.html">Use cases</a>
-          <a href="roadmap.html">Roadmap</a>
+          <a href="roadmap.html" data-nav-section="roadmap">Roadmap</a>
           <a href="playground.html">Playground</a>
         </div>
 
@@ -122,14 +130,14 @@
     <main id="main">
       <section class="page-hero">
         <div class="container reveal">
-          <p class="section-kicker">03 / Roadmap &amp; evolution tracker</p>
-          <h1>Same bloodline.<br /><em>New expression.</em></h1>
+          <p class="section-kicker">03 / Roadmap</p>
+          <h1>A JIT that refuses.<br /><em>A compiler that ships.</em></h1>
           <p class="page-hero-lede">
-            Lithon evolves in public. Follow the movement from a sharp native core to a language and runtime that more
-            people can build with.
+            Where Lithon stands, what is being built now, and what each phase has to prove before the next one starts.
+            Nothing on this page is marked shipped without a test that fails when it regresses.
           </p>
           <div class="page-hero-meta">
-            <span>Public milestones</span><span>Open contribution</span><span>Long horizon</span>
+            <span>Phase I · active</span><span>Phase II · next</span><span>Phase III · planned</span>
           </div>
         </div>
       </section>
@@ -137,79 +145,635 @@
       <section class="page-content container">
         <div class="tracker-head reveal">
           <div>
-            <p class="section-kicker">Current state</p>
-            <h2>Evolution<br /><span>in motion.</span></h2>
+            <p class="section-kicker">The three phases</p>
+            <h2>One core.<br /><span>Three horizons.</span></h2>
           </div>
           <p>
-            The tracker is a product surface, not a promise of fixed dates. Each step keeps the same standard:
-            understandability, speed, and a small core.
+            The phases are a dependency chain, not three parallel tracks. Phase II cannot start until the emitter
+            produces the same bytes everywhere, and Phase III cannot start until the emitter can be pointed at hardware
+            rather than only at the machine's userland.
           </p>
         </div>
 
-        <div class="progress-card reveal">
-          <strong>42%</strong><span>toward the next stable line</span>
-          <div class="progress-track"><i></i></div>
-          <span>v1.0.0-beta</span>
+        <div class="phase-map reveal">
+          <article class="phase-node" data-phase-state="active">
+            <p class="phase-flag"><i aria-hidden="true"></i>Active now</p>
+            <h3>Dual-tier JIT</h3>
+            <p>
+              A hand-rolled x86-64 emitter, a static flow verifier that settles every type before execution, and a
+              deterministic Tier-0 interpreter underneath.
+            </p>
+            <a href="roadmap/phase-1-dual-tier.html">Inside phase I</a>
+          </article>
+          <article class="phase-node" data-phase-state="next">
+            <p class="phase-flag"><i aria-hidden="true"></i>Next</p>
+            <h3>AOT binaries</h3>
+            <p>
+              Synthesize ELF64 and PE32+ headers directly and emit standalone executables that do not need the engine to
+              run.
+            </p>
+            <a href="roadmap/phase-2-aot.html">Inside phase II</a>
+          </article>
+          <article class="phase-node" data-phase-state="later">
+            <p class="phase-flag"><i aria-hidden="true"></i>Planned</p>
+            <h3>Systems &amp; SIMD</h3>
+            <p>
+              Emit syscalls straight from syntax, expose C pointers without a copy, and vectorize list processing with
+              AVX2.
+            </p>
+            <a href="roadmap/phase-3-systems.html">Inside phase III</a>
+          </article>
+        </div>
+
+        <div class="tracker-head reveal">
+          <div>
+            <p class="section-kicker">Milestones</p>
+            <h2>Every item,<br /><span>and its proof.</span></h2>
+          </div>
+          <p>
+            Grouped by phase, one open at a time. Select any milestone to read what it covers and the test that holds it in
+            place &mdash; if that test were deleted, the row would stop being true.
+          </p>
         </div>
 
         <div class="roadmap-filter" role="group" aria-label="Filter milestones by status">
           <button class="is-selected" type="button" data-roadmap-filter="all" aria-pressed="true">All</button>
-          <button type="button" data-roadmap-filter="done" aria-pressed="false">Complete</button>
+          <button type="button" data-roadmap-filter="done" aria-pressed="false">Shipped</button>
+          <button type="button" data-roadmap-filter="active" aria-pressed="false">In progress</button>
           <button type="button" data-roadmap-filter="next" aria-pressed="false">Next</button>
+          <button type="button" data-roadmap-filter="later" aria-pressed="false">Planned</button>
         </div>
         <p class="visually-hidden" role="status" data-roadmap-live></p>
 
-        <div class="roadmap-list">
-          <article class="roadmap-item is-done reveal" data-roadmap-status="done">
-            <span class="roadmap-marker" aria-hidden="true">✓</span>
-            <div class="roadmap-date">Past · 01</div>
-            <div>
-              <h3>Prove the core.</h3>
-              <p>
-                Establish the static flow verifier, typed AST blocks, and a native x86-64 emitter with no heavyweight
-                compiler dependency.
-              </p>
-              <div class="roadmap-tags"><span>C++20</span><span>Static analysis</span><span>x86-64</span></div>
+        <div class="roadmap-groups">
+          <section class="roadmap-group" data-phase-state="active" data-roadmap-group>
+            <h3>
+              <button
+                class="roadmap-group-toggle"
+                type="button"
+                id="roadmap-group-1"
+                aria-expanded="true"
+                aria-controls="roadmap-group-body-1"
+                data-roadmap-group-toggle
+              >
+                <span class="roadmap-group-phase">Phase I</span>
+                <span class="roadmap-group-title">Dual-tier <em>JIT engine</em></span>
+                <span class="roadmap-group-state">Active now</span>
+                <span class="roadmap-chevron" aria-hidden="true"></span>
+              </button>
+            </h3>
+            <div class="roadmap-group-body" id="roadmap-group-body-1" data-roadmap-group-body>
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Hand-rolled x86-64 encoder
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    Machine code assembled byte by byte in C++20. No LLVM, no Cranelift, no assembler &mdash; and every
+                    encoding proved against GNU <code>as</code> rather than trusted, because an encoder that is subtly
+                    wrong still produces plausible-looking disassembly.
+                  </p>
+                  <p class="roadmap-evidence">encoder_test &middot; branch_test &middot; stack_test &middot; tools/check_encoder_vs_as.py</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    SysV x64 calling convention
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    Callee-saved registers and 16-byte stack alignment proven at every call and return by disassembling each
+                    emitted function, rather than by reading the emitter and hoping.
+                  </p>
+                  <p class="roadmap-evidence">src/jit/jit_abi.h &middot; tools/check_stack_alignment.py --self-test</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="active">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Windows x64 calling convention
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">In progress</span>
+                <div class="milestone-detail">
+                  <p>
+                    The Win64 path is written and compiles, but the audit only exercises the host ABI &mdash; so on a Linux CI
+                    machine nothing has actually verified it. It stays in progress until a Windows host runs the same
+                    disassembly. Listing it as shipped would be a claim no test supports, and it also sits directly on the
+                    critical path for Phase&nbsp;II.
+                  </p>
+                  <p class="roadmap-evidence">#if defined(_WIN32) in src/jit/jit_abi.h &middot; no host-side test evidence yet</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    CPU target-feature detection
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    CPUID parsed and cross-checked against the kernel, so the AVX and AVX-512 gates cannot silently
+                    mis-detect and emit an instruction the host does not have. This is the prerequisite Phase&nbsp;III
+                    leans on, and the reason its vector work is a matter of writing the emission rather than of proving the
+                    machine can take it.
+                  </p>
+                  <p class="roadmap-evidence">cpu_features_test (30 assertions) &middot; tools/check_cpu_features.py</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    VEX/SSE transition discipline
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    A scanner that disassembles each function and flags legacy SSE after a VEX prefix with no
+                    <code>vzeroupper</code>. No AVX is emitted yet, so this is a guardrail laid before the road. Its
+                    <code>--self-test</code> mode proves the scanner actually fires, which is the difference between a
+                    guardrail and a decoration.
+                  </p>
+                  <p class="roadmap-evidence">tools/check_vex_transitions.py --self-test proves the scanner fires</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Tier-0 interpreter fallback
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    A block whose types cannot be established runs on the C++ interpreter instead of guessing, and
+                    <code>--strict</code> converts that fallback into a refusal. That flag is what makes the tier line in
+                    the output worth reading: a clean exit under <code>--strict</code> is proof the bytes were emitted and
+                    ran, where <code>--auto</code> can hide a total fallback behind output that happens to look right.
+                  </p>
+                  <p class="roadmap-evidence">tier_runner --auto &middot; src/jit/print_guard.h</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Static type flow verifier
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    Mandatory annotations, explicit integer widths, automatic widening and no narrowing anywhere. A bare
+                    <code>int</code> is not a type here: the checker rejects it by name, because a type that cannot be
+                    written down cannot be proven.
+                  </p>
+                  <p class="roadmap-evidence">tools/typecheck.py &middot; run_typed_regression.py 13/13</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    IR text format
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    The intermediate representation is parsed inside the engine, so the native tier carries no Python
+                    dependency of any kind. CPython stops existing once IR exists, which is what keeps the zero-dependency
+                    claim about the engine rather than about the build.
+                  </p>
+                  <p class="roadmap-evidence">src/ir/text_parser.cpp &middot; run_regression.py 15/15</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Calls, recursion and tail calls
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    Cross-function calls work, and a self tail-call becomes a loop &mdash; so <code>fib</code> recurses at
+                    O(1) stack rather than growing a frame per call.
+                  </p>
+                  <p class="roadmap-evidence">compile_module_call_test &middot; fib_test</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Bitwise operators and shifts
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    <code>&amp; | ^ &lt;&lt; &gt;&gt;</code>, integer-only and 64-bit, with a shift count outside
+                    <code>0..63</code> refused instead of masked into a wrong answer by the hardware.
+                  </p>
+                  <p class="roadmap-evidence">check_encoder_vs_as.py &middot; typecheck_test &middot; fuzz_diff --bitwise</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Floating point, end to end
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    SSE2 arithmetic, comparisons, load and store, and native <code>print</code>. One formatter serves both
+                    tiers, so the two agree byte for byte rather than approximately &mdash; which is the property every other
+                    float guarantee is measured against.
+                  </p>
+                  <p class="roadmap-evidence">compile_module_float_test &middot; float_format_test &middot; run_tier_diff.py 39/39</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Modulo with C semantics
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    <code>%</code> truncates toward zero and takes the sign of the dividend. This is the one deliberate
+                    divergence from CPython, and both engines implement it, which is what makes the tier diff a real check
+                    rather than two engines agreeing on a shared mistake.
+                  </p>
+                  <p class="roadmap-evidence">fuzz_diff --mod --mod-negatives &middot; adversarial 1.0 % inf</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="done">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    SSA pipeline, phases 2.1 to 2.8
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Shipped</span>
+                <div class="milestone-detail">
+                  <p>
+                    Control-flow graph and dominators, iterated dominance frontier Phi placement, Mem2Reg, copy
+                    propagation, CFG liveness, interference-graph allocation, and register coalescing so a merge can adopt a
+                    dead source&rsquo;s register. The honest size of that last win is five merges across the typed
+                    regression corpus, and the
+                    <a href="roadmap/phase-1-dual-tier.html">Phase&nbsp;I page</a> explains why it is not more.
+                  </p>
+                  <p class="roadmap-evidence">loop_info_test &middot; ssa_test &middot; mem2reg_test &middot; regalloc_test &middot; phi_register_test</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="active">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    A direct <code>Phi</code> emitter
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">In progress</span>
+                <div class="milestone-detail">
+                  <p>
+                    25 of 26 IR opcodes are emitted; this is the last one. Today a merge is lowered into a store on each
+                    predecessor edge plus a load at the join. The liveness prerequisite has already landed in
+                    <code>compute_edge_uses()</code>. What is owed is value-kind inference for a float merge, an allocator
+                    slot for the result, and codegen for the join&rsquo;s parallel copies &mdash; and that last one is the
+                    same interference problem as phase 2.8, so it relocates the coalescing question rather than shrinking
+                    it.
+                  </p>
+                  <p class="roadmap-evidence">compute_edge_uses() in liveness.h &middot; resolve_phis() in optimize.h</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="active">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Lift the two-argument cap
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">In progress</span>
+                <div class="milestone-detail">
+                  <p>
+                    Functions and calls are capped at two arguments, and most of the remaining test programs are blocked
+                    waiting on this rather than on anything deeper in the compiler.
+                  </p>
+                  <p class="roadmap-evidence">src/jit/jit_abi.h &middot; kTempPool in register_alloc.h</p>
+                </div>
+              </article>
             </div>
-          </article>
-          <article class="roadmap-item is-done reveal" data-roadmap-status="done">
-            <span class="roadmap-marker" aria-hidden="true">✓</span>
-            <div class="roadmap-date">Now · 02</div>
-            <div>
-              <h3>Make the path visible.</h3>
-              <p>
-                Document the architecture, publish examples, and give contributors a clear place to see what is happening
-                under the syntax.
-              </p>
-              <div class="roadmap-tags"><span>Docs</span><span>Examples</span><span>Community</span></div>
+          </section>
+
+          <section class="roadmap-group" data-phase-state="next" data-roadmap-group>
+            <h3>
+              <button
+                class="roadmap-group-toggle"
+                type="button"
+                id="roadmap-group-2"
+                aria-expanded="false"
+                aria-controls="roadmap-group-body-2"
+                data-roadmap-group-toggle
+              >
+                <span class="roadmap-group-phase">Phase II</span>
+                <span class="roadmap-group-title">AOT <em>binary synthesis</em></span>
+                <span class="roadmap-group-state">Next</span>
+                <span class="roadmap-chevron" aria-hidden="true"></span>
+              </button>
+            </h3>
+            <div class="roadmap-group-body" id="roadmap-group-body-2" data-roadmap-group-body hidden>
+              <article class="roadmap-item" data-roadmap-status="next">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    ELF64 and PE32+ header synthesis
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Next</span>
+                <div class="milestone-detail">
+                  <p>
+                    Write the object headers directly &mdash; program headers, section table, entry point &mdash; instead of
+                    linking against an external toolchain. It is the same kind of work as the encoder, and for the same
+                    reason: a header is a byte format, so it can be got exactly right and then checked exactly.
+                  </p>
+                  <p class="roadmap-evidence">depends on a byte-stable emitter across both host ABIs</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="next">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Standalone executables under 10&nbsp;KB
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Next</span>
+                <div class="milestone-detail">
+                  <p>
+                    A <code>.py</code> file compiled into a native binary small enough to email, with no interpreter and no
+                    runtime beside it. The budget decides the design rather than being checked at the end: a statically
+                    linked libc will not fit in it, so there is no <code>printf</code> and no <code>malloc</code>, and
+                    anything the program prints has to be formatted by emitted code.
+                  </p>
+                  <p class="roadmap-evidence">size budget is the real constraint, not the feature list</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="next">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Decoupling from the engine
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Next</span>
+                <div class="milestone-detail">
+                  <p>
+                    The emitted binary must not need the Lithon interpreter to run, which means every place emitted code
+                    currently calls back into the engine has to become either emitted code or a trap instruction in the
+                    image. Division by zero already qualifies; the shared double formatter is the expensive case.
+                  </p>
+                  <p class="roadmap-evidence">touches the shared float formatter first</p>
+                </div>
+              </article>
             </div>
-          </article>
-          <article class="roadmap-item reveal" data-roadmap-status="next">
-            <span class="roadmap-marker" aria-hidden="true">03</span>
-            <div class="roadmap-date">Next · 03</div>
-            <div>
-              <h3>Broaden the language.</h3>
-              <p>
-                Expand supported expressions, improve diagnostics, and make the typed surface feel natural for more real
-                workloads.
-              </p>
-              <div class="roadmap-tags"><span>Diagnostics</span><span>Type flow</span><span>Tooling</span></div>
+          </section>
+
+          <section class="roadmap-group" data-phase-state="later" data-roadmap-group>
+            <h3>
+              <button
+                class="roadmap-group-toggle"
+                type="button"
+                id="roadmap-group-3"
+                aria-expanded="false"
+                aria-controls="roadmap-group-body-3"
+                data-roadmap-group-toggle
+              >
+                <span class="roadmap-group-phase">Phase III</span>
+                <span class="roadmap-group-title">Systems <em>and SIMD</em></span>
+                <span class="roadmap-group-state">Planned</span>
+                <span class="roadmap-chevron" aria-hidden="true"></span>
+              </button>
+            </h3>
+            <div class="roadmap-group-body" id="roadmap-group-body-3" data-roadmap-group-body hidden>
+              <article class="roadmap-item" data-roadmap-status="later">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Direct syscall emission
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Planned</span>
+                <div class="milestone-detail">
+                  <p>
+                    The <code>0F 05</code> instruction written straight from source syntax, so a Lithon program can talk to
+                    the kernel without a libc in between. It is also the largest behavioural step in the roadmap: the
+                    emitter currently assumes a hosted C entry point, and a freestanding image has neither a stack frame
+                    nor a return address by default.
+                  </p>
+                  <p class="roadmap-evidence">needs the emitter to stop assuming a hosted C entry point</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="later">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    Zero-copy C pointers
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Planned</span>
+                <div class="milestone-detail">
+                  <p>
+                    Expose a raw pointer to a native array and let Lithon mutate it in place, with no copy on the way in or
+                    out. The type checker still gets a vote: a pointer is a type like any other, and an operation that
+                    would write through it to something narrower is refused at compile time.
+                  </p>
+                  <p class="roadmap-evidence">depends on Phase II decoupling landing first</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="later">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    AVX2 and SIMD vectorization
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Planned</span>
+                <div class="milestone-detail">
+                  <p>
+                    Parallel list processing across a vector unit. The detection gate and the VEX transition guardrail are
+                    already in place underneath it; no AVX is emitted yet.
+                  </p>
+                  <p class="roadmap-evidence">cpu_features.h gates it &middot; check_vex_transitions.py keeps it honest</p>
+                </div>
+              </article>
+
+              <article class="roadmap-item" data-roadmap-status="later">
+                <span class="roadmap-marker" aria-hidden="true"></span>
+                <h4 class="roadmap-item-title">
+                  <button class="roadmap-item-open" type="button" data-milestone-open>
+                    An ARM64 backend
+                    <span class="visually-hidden">Open details</span>
+                  </button>
+                </h4>
+                <span class="roadmap-state">Planned</span>
+                <div class="milestone-detail">
+                  <p>
+                    The genuinely architecture-neutral layers already exist: <code>ir/</code>,
+                    <code>liveness.h</code> and <code>optimize.h</code> name no registers at all. What is missing is a
+                    second encoder, which makes this a reach question rather than a design one.
+                  </p>
+                  <p class="roadmap-evidence">register_alloc.h only names registers via abi::kPromotionPool</p>
+                </div>
+              </article>
             </div>
-          </article>
-          <article class="roadmap-item reveal" data-roadmap-status="next">
-            <span class="roadmap-marker" aria-hidden="true">04</span>
-            <div class="roadmap-date">Later · 04</div>
-            <div>
-              <h3>Bring the wings further.</h3>
-              <p>
-                Explore more targets, richer tooling, and the ergonomics required for Lithon to move from an engine into a
-                daily language.
-              </p>
-              <div class="roadmap-tags"><span>Targets</span><span>Editor support</span><span>Runtime</span></div>
-            </div>
-          </article>
+          </section>
+        </div>
+
+        <div class="tracker-head reveal" id="deep-dives">
+          <div>
+            <p class="section-kicker">Deep dives</p>
+            <h2>Each phase,<br /><span>in detail.</span></h2>
+          </div>
+          <p>
+            The tracker says what is planned. These pages say why, what it costs, and what would make it wrong &mdash;
+            including the parts that are measured rather than promised.
+          </p>
+        </div>
+
+        <ul class="subpage-index reveal">
+          <li class="subpage-row">
+            <a href="roadmap/phase-1-dual-tier.html">
+              <span class="subpage-scope">Phase I</span>
+              <span class="subpage-text">
+                <strong>The dual-tier JIT engine</strong>
+                <span>The two execution tiers, the emitter, ABI and target-feature gating, the measured optimization pipeline, and all eight SSA phases with the reasoning behind each.</span>
+              </span>
+              <span class="subpage-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </li>
+          <li class="subpage-row">
+            <a href="roadmap/phase-2-aot.html">
+              <span class="subpage-scope">Phase II</span>
+              <span class="subpage-text">
+                <strong>AOT binary synthesis</strong>
+                <span>Writing ELF64 and PE32+ headers by hand, staying under 10 KB, and the decoupling work that has to happen before a binary can stand on its own.</span>
+              </span>
+              <span class="subpage-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </li>
+          <li class="subpage-row">
+            <a href="roadmap/phase-3-systems.html">
+              <span class="subpage-scope">Phase III</span>
+              <span class="subpage-text">
+                <strong>Systems and SIMD</strong>
+                <span>Syscalls emitted from syntax, zero-copy pointers into native arrays, and the AVX2 path with the feature gating already built underneath it.</span>
+              </span>
+              <span class="subpage-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </li>
+          <li class="subpage-row">
+            <a href="roadmap/language.html">
+              <span class="subpage-scope">Reference</span>
+              <span class="subpage-text">
+                <strong>Language and semantics</strong>
+                <span>Types and flow, the supported subset, and every place Lithon deliberately does not follow CPython &mdash; modulo, shifts, and the float rules.</span>
+              </span>
+              <span class="subpage-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </li>
+          <li class="subpage-row">
+            <a href="roadmap/verification.html">
+              <span class="subpage-scope">Reference</span>
+              <span class="subpage-text">
+                <strong>Verification and benchmarks</strong>
+                <span>The four checking layers from unit tests to differential fuzzing, how to isolate one optimization&rsquo;s effect, and what a green run does not prove.</span>
+              </span>
+              <span class="subpage-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </li>
+        </ul>
+
+        <div class="note reveal">
+          <strong>What counts as shipped here</strong>
+          <p>
+            A feature is marked shipped when a test exists that fails if the feature regresses, not when the code is
+            present. That is why every milestone carries evidence, and why two entries are marked in progress despite
+            working: the Win64 ABI has no test evidence yet, and <code>Phi</code> is emitted by lowering rather than by a
+            code path of its own.
+          </p>
+          <p>
+            It is also why there is no percentage on this page. A number that cannot be derived from a test is a
+            decoration, and this tracker would rather show you the tests.
+          </p>
         </div>
       </section>
+
+      <dialog class="milestone-dialog" data-milestone-dialog aria-labelledby="milestone-dialog-title">
+        <div class="milestone-dialog-bar">
+          <span class="milestone-dialog-scope" data-milestone-scope></span>
+          <button class="milestone-dialog-close" type="button" data-milestone-close aria-label="Close milestone details"></button>
+        </div>
+        <div class="milestone-dialog-body" data-milestone-body></div>
+      </dialog>
     </main>
 
     <footer class="footer">
