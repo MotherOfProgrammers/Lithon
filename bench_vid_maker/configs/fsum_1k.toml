@@ -1,0 +1,10 @@
+title = "Summing 1,000 integers: CPython vs Lithon"
+subtitle = "tiny workload -- for quickly checking the bench_vid_maker UI/video, not for real speedup numbers"
+
+[[tasks]]
+name = "CPython"
+command = ["{python}", "bench_vid_maker/tasks/python_sum_1k.py"]
+
+[[tasks]]
+name = "Lithon"
+command = ["{lithon}", "test_codes_lithon/test_1k_fsum.py"]

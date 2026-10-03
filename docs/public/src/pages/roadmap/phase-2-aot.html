@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Turning a Lithon program into a standalone native executable: ELF64 and PE32+ headers written by hand, the 10 KB budget, and the decoupling that has to happen first." />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Phase II · AOT binary synthesis | Lithon" />
+    <meta property="og:description" content="Turning a Lithon program into a standalone native executable: ELF64 and PE32+ headers written by hand, the 10 KB budget, and the decoupling that has to happen first." />
+    <meta name="twitter:card" content="summary" />
+    <title>Phase II · AOT binary synthesis | Lithon</title>
+    <link rel="icon" href="../../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../../../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../../../fonts/fonts.css" />
+    <link rel="stylesheet" href="../../styles/base.css" />
+    <link rel="stylesheet" href="../../styles/pages/inner-pages.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body data-nav-section="roadmap">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="../../index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="../../index.html#engine">The engine</a>
+          <a href="../docs.html">Docs</a>
+          <a href="../use-cases.html">Use cases</a>
+          <a href="../roadmap.html" data-nav-section="roadmap">Roadmap</a>
+          <a href="../playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero">
+        <div class="container reveal">
+          <p class="section-kicker">Roadmap &middot; Phase II</p>
+          <h1>From a process<br /><em>to a file.</em></h1>
+          <p class="page-hero-lede">
+            What it takes to compile a Lithon program into a native executable that runs on a machine with no Lithon installed and nothing beside it.
+          </p>
+          <div class="page-hero-meta">
+            <span>Planned</span><span>ELF64 and PE32+</span><span>Under 10 KB</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-content container">
+        <div class="split-layout">
+          <aside class="side-index">
+            <p>On this page</p>
+            <a class="is-current" href="#goal" aria-current="true">What ships</a>
+            <a href="#headers">Headers by hand</a>
+            <a href="#budget">The 10 KB budget</a>
+            <a href="#decoupling">Stopping the callbacks</a>
+            <a href="#sequence">Why this waits</a>
+          </aside>
+
+          <div class="content-column">
+            <div class="doc-block reveal" id="goal">
+              <h2 style="margin: 0 0 22px">From a process<br /><span>to a file.</span></h2>
+              <p>
+                Everything in Phase I runs in-process: the emitter writes bytes, the engine maps them executable, and the
+                host calls in. That is a JIT, and a JIT has a floor &mdash; the engine has to be there. Phase II removes
+                the floor by emitting the container as well as the code.
+              </p>
+              <p>
+                The target is deliberately unambitious in the way that matters: a Lithon program compiles to a native
+                executable, <code>.bin</code> or <code>.exe</code>, that runs on a machine with no Lithon installed and
+                nothing beside it. Not a bundle. Not a runtime. One file.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>input</dt><dd>a <code>.py</code> file</dd></div>
+                <div class="spec-line"><dt>output</dt><dd>a native executable</dd></div>
+                <div class="spec-line"><dt>targets</dt><dd>ELF64 (Linux) &middot; PE32+ (Windows)</dd></div>
+                <div class="spec-line"><dt>size budget</dt><dd class="measure">under 10 KB</dd></div>
+                <div class="spec-line"><dt>needs the engine at run time</dt><dd class="no">never</dd></div>
+              </dl>
+            </div>
+
+            <div class="doc-block reveal" id="headers">
+              <h3><span>01</span>Headers written by hand</h3>
+              <p>
+                There is no system linker in this plan. The object file is synthesized directly: the ELF64 header and its
+                program headers on Linux, the DOS stub, PE signature and section table on Windows, then the emitted
+                machine code appended into a loadable segment with an entry point.
+              </p>
+              <p>
+                This is the part of the project most like the encoder itself, and for the same reason: it is a byte format,
+                so it can be got exactly right and then checked exactly. A header is also unforgiving in a way source code
+                is not &mdash; a field that is merely unusual loads, and a field that is wrong does not.
+              </p>
+              <div class="note">
+                <strong>What has to be true first</strong>
+                <p>
+                  A loadable image is only as stable as the code inside it. Before a binary can be written out, the emitter
+                  has to produce the same bytes for the same IR on both ABIs &mdash; which is exactly the gap the Win64
+                  audit has to close first.
+                </p>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="budget">
+              <h3><span>02</span>The 10&nbsp;KB budget</h3>
+              <p>
+                Under 10 KB is a constraint that decides the design rather than a target checked at the end. A statically
+                linked libc will not fit in it, which means no <code>printf</code>, no <code>malloc</code>, and no
+                <code>snprintf</code> &mdash; so anything the program prints has to be formatted by emitted code.
+              </p>
+              <p>
+                That is not as frightening as it sounds, because most of what a Lithon program needs is already written in
+                the engine. Float formatting is the honest example: <code>host_format_double()</code> already reproduces
+                CPython&rsquo;s shortest-round-trip rule, and the version that would have to move into the binary is a
+                translation rather than a redesign. Integer formatting is easier still.
+              </p>
+              <div class="info-grid">
+                <article class="info-tile">
+                  <strong>Fits</strong>
+                  <p>Integer formatting, simple output, arithmetic, control flow &mdash; all of it already emits.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Must move</strong>
+                  <p>The shared double formatter, which today lives in host code called by both tiers.</p>
+                </article>
+                <article class="info-tile">
+                  <strong>Will not fit</strong>
+                  <p>A hosted C runtime. Every syscall it would have made becomes Phase III work instead.</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="decoupling">
+              <h3><span>03</span>Stopping the callbacks</h3>
+              <p>
+                The harder half of decoupling is not the headers. It is every place the emitted code currently calls back
+                into the engine to get something done &mdash; formatting a float, trapping a division by zero, refusing an
+                out-of-range shift. Each of those is a call into a symbol the binary will not have.
+              </p>
+              <p>
+                So each one has to become either emitted code or a trap instruction in the image. Division by zero is the
+                clean case, because it already lowers to a compare and a branch rather than a libm call. Float formatting
+                is the expensive case, because it is the one piece of real logic the runtime currently provides.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>div by zero</dt><dd>already a compare and a branch</dd></div>
+                <div class="spec-line"><dt>shift count check</dt><dd>already emitted, compile-time when constant</dd></div>
+                <div class="spec-line"><dt>float formatting</dt><dd class="no">host call &middot; must move into the image</dd></div>
+                <div class="spec-line"><dt>symbol resolution</dt><dd class="no">host call &middot; must become static</dd></div>
+              </dl>
+            </div>
+
+            <div class="doc-block reveal" id="sequence">
+              <h3><span>04</span>Why this waits</h3>
+              <p>
+                Phase I is still moving, and Phase II inherits everything it has not finished. Two items in particular are
+                on the critical path: the Win64 ABI has no test evidence yet, and the <code>Phi</code> emitter is owed.
+              </p>
+              <p>
+                Neither blocks writing a header, but both mean the emitted image would still change shape &mdash; and an
+                image format is much harder to revise once binaries exist in the wild. Sequencing Phase II after Phase I
+                closes is cheaper than versioning a container format.
+              </p>
+              <div class="subpage-nav">
+                <a href="phase-3-systems.html">
+                  <span>Next in the roadmap</span>
+                  <strong>Phase III &middot; Systems and SIMD</strong>
+                </a>
+                <a href="../roadmap.html">
+                  <span>Back to</span>
+                  <strong>The full tracker</strong>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="../../index.html">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+    <script type="module" src="../../scripts/roadmap-page.js"></script>
+  </body>
+</html>

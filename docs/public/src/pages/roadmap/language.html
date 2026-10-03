@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Lithon's type system, supported subset, and every deliberate divergence from CPython: truncating modulo, 64-bit shifts, and byte-exact float parity." />
+    <meta name="theme-color" content="#f8fff4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Language and semantics | Lithon" />
+    <meta property="og:description" content="Lithon's type system, supported subset, and every deliberate divergence from CPython: truncating modulo, 64-bit shifts, and byte-exact float parity." />
+    <meta name="twitter:card" content="summary" />
+    <title>Language and semantics | Lithon</title>
+    <link rel="icon" href="../../../icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="../../../fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../../../fonts/fonts.css" />
+    <link rel="stylesheet" href="../../styles/base.css" />
+    <link rel="stylesheet" href="../../styles/pages/inner-pages.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+  </head>
+  <body data-nav-section="roadmap">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav container" aria-label="Main navigation">
+        <a class="brand" href="../../index.html" aria-label="Lithon home">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="nav-links">
+          <a href="../../index.html#engine">The engine</a>
+          <a href="../docs.html">Docs</a>
+          <a href="../use-cases.html">Use cases</a>
+          <a href="../roadmap.html" data-nav-section="roadmap">Roadmap</a>
+          <a href="../playground.html">Playground</a>
+        </div>
+
+        <div class="nav-actions">
+          <a
+            class="icon-button"
+            href="https://github.com/MotherOfProgrammers/Lithon"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open Lithon on GitHub"
+            data-tooltip="GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.5-1.27-1.22-1.6-1.22-1.6-1-.69.08-.68.08-.68 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.2.91.1-.71.38-1.2.7-1.47-2.5-.28-5.13-1.26-5.13-5.58 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.1 1.15a10.75 10.75 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.29-5.15 5.57.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"
+              />
+            </svg>
+          </a>
+          <a
+            class="icon-button"
+            href="https://discord.gg/qaJD8Kxys"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join the Lithon Discord"
+            data-tooltip="Discord"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.54 5.24A16.3 16.3 0 0 0 15.5 4l-.5 1.03a14.2 14.2 0 0 0-6 0L8.5 4a16.36 16.36 0 0 0-4.04 1.25C1.9 9.1 1.2 12.86 1.55 16.57a16.25 16.25 0 0 0 4.97 2.5l1.2-1.62c-.66-.24-1.3-.54-1.9-.89l.47-.36c3.67 1.7 7.65 1.7 11.28 0l.48.36c-.61.35-1.25.65-1.9.89l1.19 1.62a16.2 16.2 0 0 0 4.97-2.5c.42-4.3-.72-8.02-2.77-11.33ZM8.33 14.43c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Zm7.34 0c-1.1 0-2-.98-2-2.2 0-1.21.88-2.2 2-2.2 1.13 0 2.02.99 2 2.2 0 1.22-.88 2.2-2 2.2Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-button sound-toggle" type="button" aria-label="Turn interface sound on" aria-pressed="false" data-tooltip="Sound off">
+            <svg class="sound-on-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+            </svg>
+            <svg class="sound-off-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+              <path d="m16 10 4 4M20 10l-4 4" />
+            </svg>
+          </button>
+          <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.25" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"
+              />
+            </svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.25 15.43A8.7 8.7 0 0 1 8.57 3.75 8.72 8.72 0 1 0 20.25 15.43Z" />
+            </svg>
+          </button>
+          <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero">
+        <div class="container reveal">
+          <p class="section-kicker">Roadmap &middot; Reference</p>
+          <h1>Where Lithon<br /><em>parts ways.</em></h1>
+          <p class="page-hero-lede">
+            A language that is a strict superset of CPython cannot skip boxing. This is the honest list of what was traded away to get static proof, and why each trade was worth it.
+          </p>
+          <div class="page-hero-meta">
+            <span>Types and flow</span><span>Modulo and shifts</span><span>Float parity</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-content container">
+        <div class="split-layout">
+          <aside class="side-index">
+            <p>On this page</p>
+            <a class="is-current" href="#types" aria-current="true">Types &amp; flow</a>
+            <a href="#subset">The subset</a>
+            <a href="#modulo">Modulo</a>
+            <a href="#shifts">Shifts</a>
+            <a href="#floats">Float parity</a>
+            <a href="#divergences">Every divergence</a>
+          </aside>
+
+          <div class="content-column">
+            <div class="doc-block reveal" id="types">
+              <h2 style="margin: 0 0 22px">Where Lithon<br /><span>parts ways.</span></h2>
+              <p>
+                A language that is a strict superset of CPython cannot skip boxing, because CPython&rsquo;s semantics
+                require it. Lithon makes a different promise instead &mdash; every variable has a proven, fixed type
+                before execution begins &mdash; and that promise costs a few Python behaviours. This page is the honest
+                list of what was traded away and why.
+              </p>
+              <h3><span>01</span>Types and flow</h3>
+              <p>
+                Every binding carries an explicit annotation and every numeric type carries an explicit width. A bare
+                <code>int</code> is not a type in Lithon; the checker rejects it by name, which is the whole point &mdash; a
+                type that cannot be written down cannot be proven.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>signed integers</dt><dd><code>int[8] int[16] int[32] int[64]</code></dd></div>
+                <div class="spec-line"><dt>floating point</dt><dd><code>float[32] float[64]</code></dd></div>
+                <div class="spec-line"><dt>boolean</dt><dd><code>bool</code> &middot; takes no width</dd></div>
+                <div class="spec-line"><dt>unannotated binding</dt><dd class="no">rejected</dd></div>
+                <div class="spec-line"><dt>widening</dt><dd>automatic</dd></div>
+                <div class="spec-line"><dt>narrowing</dt><dd class="no">never allowed</dd></div>
+                <div class="spec-line"><dt>int &rarr; float</dt><dd>automatic</dd></div>
+                <div class="spec-line"><dt>float &rarr; int</dt><dd class="no">no cast syntax exists</dd></div>
+                <div class="spec-line"><dt>bare integer literal</dt><dd>is <code>int[64]</code></dd></div>
+              </dl>
+              <div class="note">
+                <strong>Why there is no float-to-int cast</strong>
+                <p>
+                  A narrowing is refused everywhere else too, but a cast would be different in kind: it is a request to
+                  re-interpret a value the type system has already settled. Leaving it out means <code>int</code> and
+                  <code>float</code> stay separate worlds, and adding one later cannot silently change the meaning of
+                  code that was written without it.
+                </p>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="subset">
+              <h3><span>02</span>The supported subset</h3>
+              <p>
+                Small on purpose, and the boundaries are worth knowing before you write anything against the native tier.
+                Everything outside this set falls to the Tier-0 interpreter rather than failing to compile, which is why
+                <code>--strict</code> exists.
+              </p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>assignment</dt><dd>typed and untyped</dd></div>
+                <div class="spec-line"><dt>augmented assignment</dt><dd><code>+= -= *= /=</code></dd></div>
+                <div class="spec-line"><dt>arithmetic</dt><dd><code>+ - * / %</code></dd></div>
+                <div class="spec-line"><dt>bitwise</dt><dd><code>&amp; | ^ &lt;&lt; &gt;&gt;</code> &middot; integer only</dd></div>
+                <div class="spec-line"><dt>comparisons</dt><dd>single, non-chained</dd></div>
+                <div class="spec-line"><dt>boolean operators</dt><dd><code>and or not</code> &middot; two operands</dd></div>
+                <div class="spec-line"><dt>control flow</dt><dd><code>if elif else while</code></dd></div>
+                <div class="spec-line"><dt>conditionals as values</dt><dd><code>a if c else b</code> &middot; nested</dd></div>
+                <div class="spec-line"><dt>loops</dt><dd><code>for x in range(N)</code> &middot; one argument</dd></div>
+                <div class="spec-line"><dt>functions</dt><dd>recursion, self tail calls &middot; max 2 arguments</dd></div>
+                <div class="spec-line"><dt>chained comparison</dt><dd class="no">not supported</dd></div>
+                <div class="spec-line"><dt><code>for</code>&thinsp;/&thinsp;<code>else</code></dt><dd class="no">rejected, never silently dropped</dd></div>
+              </dl>
+            </div>
+
+            <div class="doc-block reveal" id="modulo">
+              <h3><span>03</span><code>%</code> is C&rsquo;s, not Python&rsquo;s</h3>
+              <p>
+                This is the one place Lithon deliberately does not follow Python, so it is worth stating plainly rather
+                than leaving to a comment in a header. <code>%</code> truncates toward zero and takes the sign of the
+                <strong>dividend</strong>. CPython floors instead, so its remainder has the sign of the
+                <strong>divisor</strong>.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>the same program, two engines</span></div>
+                <pre><span class="accent">print</span>(-7 % 3)   <span class="muted"># Lithon: -1     CPython: 2</span>
+<span class="accent">print</span>(7 % -3)   <span class="muted"># Lithon:  1     CPython: -2</span></pre>
+              </div>
+              <p>
+                That is what C, Rust, Java and every other compiled language do. The reason is the one C gives: a remainder
+                never leaves the domain of its operands, so <code>Mod</code> is typed like <code>Mul</code> &mdash; int
+                if both operands are int &mdash; rather than like <code>Div</code>, which has to widen to float because a
+                quotient generally is not an integer. Typing it as <code>Div</code> would make <code>7 % 3</code> a float
+                and lose the point.
+              </p>
+              <p>
+                Both engines here implement the truncating rule, which is what makes the tier diff a meaningful check
+                rather than two engines agreeing on a shared mistake. The consequences are all covered by tests:
+              </p>
+              <ul class="spec-list">
+                <li class="spec-line"><dt>zero divisor</dt><dd>traps on both engines, with its own <code>modulo by zero</code> message</dd></li>
+                <li class="spec-line"><dt><code>INT64_MIN % -1</code></dt><dd><code>0</code> &middot; the one input that makes hardware <code>idiv</code> raise <code>#DE</code>, so the divisor is tested up front</dd></li>
+                <li class="spec-line"><dt>constant power-of-two divisor</dt><dd>strength-reduced to a mask and a sign fixup</dd></li>
+                <li class="spec-line"><dt>float <code>Mod</code></dt><dd class="no">no SSE2 instruction &middot; computed as <code>a - n*b</code> for <code>n = trunc(a/b)</code></dd></li>
+              </ul>
+              <div class="note">
+                <strong>The one float case that can go wrong</strong>
+                <p>
+                  Float modulo has no SSE2 instruction, so it is computed the way C defines it. The interesting input is
+                  <code>n == 0</code>, which happens exactly when <code>|a| &lt; |b|</code>, and it is the only case where
+                  the multiply is unsafe: IEEE makes <code>0 * inf</code> a NaN, but <code>n*b</code> is 0 for every
+                  <code>b</code> when <code>n</code> is 0, so C&rsquo;s <code>fmod(1.0, inf)</code> is <code>1.0</code>.
+                  The guard that skips the multiply has to tell a real zero quotient from a NaN one using the same
+                  <code>ZF AND !PF</code> shape as the zero-divisor check, because <code>comisd</code> sets ZF for an
+                  unordered compare too.
+                </p>
+                <p>
+                  A zero remainder is normalized to <code>+0.0</code> to match CPython, which does not preserve the
+                  dividend&rsquo;s sign. C&rsquo;s <code>fmod(-4.0, 2.0)</code> is <code>-0.0</code>; Lithon prints
+                  <code>0.0</code>. That is a conscious divergence, chosen so the float and integer paths agree with each
+                  other rather than each matching a different authority.
+                </p>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="shifts">
+              <h3><span>04</span>Shifts are 64-bit, and the count is checked</h3>
+              <p>
+                <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>&lt;&lt;</code> and <code>&gt;&gt;</code> are
+                integer-only, and each is a plain 64-bit machine operation. <code>&gt;&gt;</code> is arithmetic
+                (<code>sar</code>), so <code>-8 &gt;&gt; 1</code> is <code>-4</code>.
+              </p>
+              <p>
+                Three rules follow from the machine word being 64 bits wide, and all three diverge from CPython, whose ints
+                are unbounded.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>where the word ends</span></div>
+                <pre><span class="accent">print</span>(5 &lt;&lt; 63)   <span class="muted"># Lithon: -9223372036854775808</span>
+                          <span class="muted"># CPython: 46116860184273879040</span>
+<span class="accent">print</span>(5 &lt;&lt; 62)   <span class="muted"># Lithon:  4611686018427387904</span>
+                          <span class="muted"># CPython: 4611686018427387904</span>
+<span class="accent">print</span>(1 &lt;&lt; 64)   <span class="muted"># Lithon: RCR error</span>
+                          <span class="muted"># CPython: 18446744073709551616</span></pre>
+              </div>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>left shift overflow</dt><dd>wraps to the low 64 bits &middot; nothing is trapped, because there is no wider type to widen to</dd></div>
+                <div class="spec-line"><dt>count outside <code>0..63</code></dt><dd class="no">refused &middot; compile time if literal, run time if not</dd></div>
+                <div class="spec-line"><dt>float operands</dt><dd class="no">type error &middot; there is no float bit pattern to reinterpret</dd></div>
+                <div class="spec-line"><dt>result width</dt><dd>the left operand&rsquo;s width</dd></div>
+              </dl>
+              <p>
+                Refusing a bad shift count is the one place where x86 actively works against you: the hardware masks the
+                count to its low six bits, so <code>1 &lt;&lt; 64</code> would execute as a shift by zero and return
+                <code>1</code>, and <code>1 &lt;&lt; -1</code> as a shift by 63. Lithon raises an error rather than
+                returning the wrong answer.
+              </p>
+              <p>
+                Which encoding gets used depends on whether the count is known at compile time, and that is only visible in
+                the generated code &mdash; which is exactly the sort of claim the engine makes checkable:
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>--dump-hex, then objdump</span></div>
+                <pre>shl rax,0x3      <span class="muted"># 48 c1 e0 03   literal count 3, never touches CL</span>
+shl rax,1        <span class="muted"># 48 d1 e0      literal count 1, the 2-byte short form</span>
+shl rax,cl       <span class="muted"># 48 d3 e0      dynamic count</span>
+sar rax,cl       <span class="muted"># 48 d3 f8      dynamic count</span></pre>
+              </div>
+            </div>
+
+            <div class="doc-block reveal" id="floats">
+              <h3><span>05</span>Float, and what &ldquo;identical&rdquo; had to mean</h3>
+              <p>
+                <code>float</code> is implemented end to end: constants, load and store, the five arithmetic operations,
+                the three comparisons, and native <code>print</code>. The hard part was never the arithmetic &mdash; SSE2 is
+                straightforward once the encoding is right &mdash; it was making the two engines agree
+                <em>byte for byte</em>, since that is the property everything else is measured against.
+              </p>
+              <div class="note">
+                <strong>Formatting is one function, called by both</strong>
+                <p>
+                  CPython&rsquo;s rule is the shortest string that round-trips, which rules out both <code>%f</code>
+                  (prints <code>3.500000</code>) and <code>%.17g</code> (prints <code>0.10000000000000001</code>).
+                  <code>%.*g</code> is wrong in a way that is easy to miss: it picks exponent notation based on the
+                  precision it happened to need, whereas CPython&rsquo;s threshold is absolute &mdash; decimal exponent
+                  below &minus;4 or above 16. That is why <code>924966630.0</code> must print in full, not as
+                  <code>9.2499663e+08</code>.
+                </p>
+              </div>
+              <p>The rules that took the most care, each pinned by a test:</p>
+              <dl class="spec-list">
+                <div class="spec-line"><dt>division by zero</dt><dd>traps, matching Python&rsquo;s <code>ZeroDivisionError</code> rather than IEEE <code>inf</code>/<code>nan</code></dd></div>
+                <div class="spec-line"><dt>NaN divisor</dt><dd class="no">must not trap &middot; Python propagates</dd></div>
+                <div class="spec-line"><dt><code>-0.0</code> divisor</dt><dd>traps &middot; it compares equal to <code>0.0</code></dd></div>
+                <div class="spec-line"><dt>NaN comparison</dt><dd>false against everything, including itself</dd></div>
+                <div class="spec-line"><dt>float live across a call</dt><dd>spills &middot; every XMM is caller-saved on both ABIs</dd></div>
+                <div class="spec-line"><dt>variable stored both an int and a float</dt><dd class="no">refused &middot; the kind joins to <code>Unknown</code></dd></div>
+              </dl>
+              <p>
+                The last row is the one worth understanding. If a variable&rsquo;s kind joins to <code>Unknown</code> and
+                codegen only ever asks <code>is_float_value</code>, the arithmetic lowers as <em>integer</em> operations
+                over a double&rsquo;s bit pattern. Printing the resulting <code>bool</code> hides the bug completely,
+                because a comparison is always <code>bool</code> and so always passes the print check. The guard is what
+                turns a silent wrong answer into a refusal.
+              </p>
+              <p>
+                The <code>ZF AND !PF</code> shape recurs throughout, and it is not incidental:
+                <code>comisd</code> sets ZF, PF and CF together when the operands are unordered, so ZF alone cannot separate
+                &ldquo;equal&rdquo; from &ldquo;NaN&rdquo;. The same problem is why NaN comparisons are excluded with
+                <code>setcc</code> plus <code>AND setnp</code> rather than a parity branch &mdash; <code>0F 9A</code> is a
+                byte-for-byte collision between <code>jp rel32</code> and <code>setp r/m8</code>, so a parity
+                <code>Jcc</code> is simply not encodable here.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="divergences">
+              <h3><span>06</span>Every deliberate divergence</h3>
+              <p>
+                Collected in one place, because a divergence discovered by surprise is worse than one documented in
+                advance. The last row is a bug rather than a choice, and is listed so it is not mistaken for policy.
+              </p>
+              <div class="data-wrap">
+                <table class="data-table">
+                  <caption>Lithon vs CPython</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Case</th>
+                      <th scope="col">Lithon</th>
+                      <th scope="col">CPython</th>
+                      <th scope="col">Why</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Modulo sign</th>
+                      <td>sign of dividend</td>
+                      <td>sign of divisor</td>
+                      <td>matches C; keeps <code>Mod</code> int-typed</td>
+                    </tr>
+                    <tr>
+                      <th scope="row"><code>-0.0</code> remainder</th>
+                      <td><code>0.0</code></td>
+                      <td><code>0.0</code></td>
+                      <td>so the float and integer paths agree with each other</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Left shift past 63</th>
+                      <td>wraps</td>
+                      <td>grows</td>
+                      <td>no wider type exists to widen into</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Shift count <code>&gt; 63</code></th>
+                      <td class="no">refused</td>
+                      <td>computed</td>
+                      <td>hardware would mask it and return a wrong answer</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Loop variable after exit</th>
+                      <td><code>v == n</code></td>
+                      <td><code>n - 1</code></td>
+                      <td>documented; the tier diff reports it separately</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Unbounded ints</th>
+                      <td class="no">do not exist</td>
+                      <td>arbitrary precision</td>
+                      <td>precision is the one guarantee a machine word cannot make</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="note">
+                <strong>The interpreter is an oracle, not a specification</strong>
+                <p>
+                  Where Lithon and CPython disagree, the tier-diff harness reports it as a language gap rather than a JIT
+                  bug, which is correct for this project and also means the suite cannot catch a bug where both engines
+                  share the same wrong idea. The loop-variable row above is the known case.
+                </p>
+              </div>
+              <div class="subpage-nav">
+                <a href="verification.html">
+                  <span>Read next</span>
+                  <strong>Verification and benchmarks</strong>
+                </a>
+                <a href="../roadmap.html">
+                  <span>Back to</span>
+                  <strong>The full tracker</strong>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <a class="brand" href="../../index.html">
+          <svg class="boa-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <path
+              class="boa-mark__coil"
+              d="M25.7 8.3c-4.9-3.8-12.3-2.8-15.3 2.2-2.8 4.7-.6 10.1 4 11.8 4.3 1.6 8.5-1 8.2-4.9-.2-2.8-3.2-4.1-5.4-2.5-1.1.8-1.2 2.2-.6 3.1M9.7 25.3c4.2 5.7 13.1 6.2 17.8 1.8 2.8-2.6 3.5-5.9 2.2-8.6"
+            />
+            <path class="boa-mark__head" d="M23.8 7.5c2.7-2 6.7-1.1 7.8 1.9l-1.3 3.9-3.9.8-3.1-2.2.5-4.4Z" />
+            <circle class="boa-mark__eye" cx="28.8" cy="9.1" r="1" />
+          </svg>
+          <span class="brand-name">lithon<span class="brand-dot">.</span></span>
+        </a>
+        <span class="footer-copy"
+          >Not a revolution but an evolution of the same bloodline. <span>© 2026 Lithon contributors.</span></span
+        >
+        <div class="footer-links">
+          <a href="https://github.com/MotherOfProgrammers/Lithon" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="#main">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var stored = window.localStorage.getItem("lithon-theme");
+          root.dataset.theme =
+            stored === "dark" || stored === "light"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          root.dataset.theme = "light";
+        }
+        root.classList.add("js");
+        root.dataset.jsPending = "1";
+        window.setTimeout(function () {
+          if (root.dataset.jsPending === "1") root.classList.remove("js");
+        }, 1500);
+      })();
+    </script>
+    <script type="module" src="../../scripts/roadmap-page.js"></script>
+  </body>
+</html>

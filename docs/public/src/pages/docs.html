@@ -58,7 +58,7 @@
           <a href="../index.html#engine">The engine</a>
           <a href="docs.html">Docs</a>
           <a href="use-cases.html">Use cases</a>
-          <a href="roadmap.html">Roadmap</a>
+          <a href="roadmap.html" data-nav-section="roadmap">Roadmap</a>
           <a href="playground.html">Playground</a>
         </div>
 
@@ -125,8 +125,8 @@
           <p class="section-kicker">01 / Documentation</p>
           <h1>Know the path<br />from <em>source</em> to speed.</h1>
           <p class="page-hero-lede">
-            How Lithon is built and run: the annotation grammar the verifier actually accepts, the two execution tiers,
-            and the gaps that are still open.
+            How Lithon is built and run: the annotation grammar the verifier actually accepts, the two execution tiers, the
+            optimizer and SSA pipeline behind the native path, and the gaps that are still open.
           </p>
           <div class="page-hero-meta">
             <span>Mandatory static types</span><span>Dual-tier execution</span><span>Zero dependencies</span>
@@ -142,7 +142,10 @@
             <a href="#mental-model">Mental model</a>
             <a href="#types">Types &amp; flow</a>
             <a href="#language">Language subset</a>
+            <a href="#pipeline">The pipeline</a>
+            <a href="#semantics">Semantics</a>
             <a href="#runtime">Runtime</a>
+            <a href="#verification">Verification</a>
             <a href="#limits">Honest limits</a>
           </aside>
 
@@ -288,8 +291,177 @@ j: <span class="accent">int[64]</span> = 0
               </div>
             </div>
 
+            <div class="doc-block reveal" id="pipeline">
+              <h3><span>04</span>The optimizer and the SSA pipeline</h3>
+              <p>
+                Register allocation and liveness are shipped and tested, and so is a set of optimizations that can each be
+                switched off individually, so their effect is measured rather than assumed. Strength reduction, callee-saved
+                borrowing, constant folding, dead code elimination and loop rotation are all in that set.
+              </p>
+              <div class="data-wrap">
+                <table class="data-table">
+                  <caption>Measured against HEAD, one pass at a time</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Change</th>
+                      <th scope="col">Lives in</th>
+                      <th scope="col">Effect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Strength-reduced multiplies</th>
+                      <td><code>optimize.h</code></td>
+                      <td class="measure">nested 1.062&times;</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Accumulator unroll <span class="no">(opt-in)</span></th>
+                      <td><code>optimize.h</code></td>
+                      <td class="measure">float reduction 1.58&times; &middot; 95.8 &rarr; 60.5 ms</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Callee-saved borrowing</th>
+                      <td><code>register_alloc.h</code></td>
+                      <td class="measure">fib 1.063&times;</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Mem2Reg + SSA copy resolution</th>
+                      <td><code>ssa.h</code></td>
+                      <td>29 loads &middot; 20 stores removed</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Diamond unrolling <span class="no">(opt-in)</span></th>
+                      <td><code>optimize.h</code></td>
+                      <td class="no">1.10&times; slower, kept behind a flag</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                Underneath sits the SSA conversion, done one switchable phase at a time. The IR keeps mutable variables in
+                memory &mdash; a variable is written by a <code>Store</code> and read by a <code>Load</code>, exactly like a
+                spill slot &mdash; so promotion here means turning those into values that live in registers.
+              </p>
+              <div class="data-wrap">
+                <table class="data-table">
+                  <caption>SSA phases · all shipped</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Phase</th>
+                      <th scope="col">What it adds</th>
+                      <th scope="col">Lives in</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">2.1</th>
+                      <td>CFG, Cooper-Harvey-Kennedy dominators, natural loops, preheaders, latches, exits</td>
+                      <td><code>loop_info.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.2</th>
+                      <td>Phi placement by iterated dominance frontier</td>
+                      <td><code>ssa.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.3</th>
+                      <td>Mem2Reg &mdash; promote, place phis, rewrite the memory traffic away</td>
+                      <td><code>ssa.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.4</th>
+                      <td>SSA copy propagation, dead-value elimination, then <code>resolve_phis()</code></td>
+                      <td><code>optimize.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.5</th>
+                      <td>Phi copies as register moves instead of a memory round-trip</td>
+                      <td><code>register_alloc.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.6</th>
+                      <td>Dedicated loop-exit blocks where the exit edge is genuinely shared</td>
+                      <td><code>loop_info.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.7</th>
+                      <td>CFG liveness and interference-graph allocation</td>
+                      <td><code>liveness.h</code></td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2.8</th>
+                      <td>Register coalescing &mdash; a merge adopts its source&rsquo;s dead register</td>
+                      <td>both halves</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="note">
+                <strong>One decision in there is load-bearing</strong>
+                <p>
+                  Promotion is gated on a <em>must</em>-analysis that iterates <strong>down</strong> from
+                  &ldquo;everything&rdquo;, converging on the greatest fixpoint. Iterating upward from nothing, a variable
+                  assigned in a preheader and read inside the loop collapses at the header to the meet of
+                  <code>{preheader}</code> and <code>{back edge}</code>, the back-edge set never picks it up, and ordinary
+                  loop accumulators become silently un-promotable forever. Anything the analysis cannot prove stays in
+                  memory, and <code>vars_declined</code> reports it.
+                </p>
+              </div>
+              <p>
+                The <a href="roadmap/phase-1-dual-tier.html">Phase&nbsp;I page</a> walks through all eight phases with the
+                reasoning behind each, including why register coalescing honestly deletes five merges across the typed
+                regression corpus and not more.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="semantics">
+              <h3><span>05</span>Semantics worth knowing before you write anything</h3>
+              <p>
+                A few places where Lithon does not follow CPython, either because the machine word forces a decision or
+                because a deliberate one was made. All of them are tested.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>modulo · truncating, like C</span></div>
+                <pre><span class="accent">print</span>(-7 % 3)   <span class="muted"># Lithon: -1     CPython: 2</span>
+<span class="accent">print</span>(7 % -3)   <span class="muted"># Lithon:  1     CPython: -2</span></pre>
+              </div>
+              <p>
+                <code>%</code> truncates toward zero and takes the sign of the dividend, which is what C, Rust and Java do.
+                The reason is that a remainder never leaves the domain of its operands, so <code>Mod</code> is typed like
+                <code>Mul</code> rather than like <code>Div</code> &mdash; typing it as <code>Div</code> would make
+                <code>7 % 3</code> a <code>float</code>. A zero divisor traps on both engines, and a constant power-of-two
+                divisor is strength-reduced to a mask and a sign fixup.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>shifts · 64-bit, count checked</span></div>
+                <pre><span class="accent">print</span>(5 &lt;&lt; 63)   <span class="muted"># Lithon: -9223372036854775808</span>
+                          <span class="muted"># CPython: 46116860184273879040</span>
+<span class="accent">print</span>(1 &lt;&lt; 64)   <span class="muted"># Lithon: RCR error</span>
+                          <span class="muted"># CPython: 18446744073709551616</span></pre>
+              </div>
+              <p>
+                Left shifts wrap, because there is no wider type to widen into. A count outside <code>0..63</code> is
+                refused &mdash; at compile time for a literal, at run time otherwise &mdash; because x86 would mask it to its
+                low six bits and return a wrong answer. <code>2.5 &amp; 1</code> is a type error: there is no float bit
+                pattern in Lithon to reinterpret.
+              </p>
+              <p>
+                Floats are implemented end to end in SSE2, and the hard part was never the arithmetic &mdash; it was making
+                the two engines agree byte for byte, since that is the property everything else is measured against.
+                Division by zero traps like Python&rsquo;s <code>ZeroDivisionError</code> rather than producing IEEE
+                <code>inf</code>/<code>nan</code>, a NaN divisor must <em>not</em> trap because Python propagates it, and
+                <code>-0.0</code> must, because it compares equal to <code>0.0</code>. A float live across a call spills,
+                since every XMM register is caller-saved on both ABIs.
+              </p>
+              <p>
+                The <a href="roadmap/language.html">language and semantics page</a> has the full list, including the
+                <code>ZF AND !PF</code> problem that makes <code>comisd</code> unable to tell &ldquo;equal&rdquo; from
+                &ldquo;NaN&rdquo; on its own.
+              </p>
+            </div>
+
             <div class="doc-block reveal" id="runtime">
-              <h3><span>04</span>Runtime notes</h3>
+              <h3><span>06</span>Runtime notes</h3>
               <p>
                 The backend is a hand-rolled x86-64 encoder written in C++20. Emitted machine code is written straight into
                 memory the OS marked executable, and called through a function pointer — <code>mmap</code> with
@@ -318,46 +490,115 @@ j: <span class="accent">int[64]</span> = 0
                 since every XMM register is caller-saved on both ABIs.
               </p>
               <p>
-                Register allocation and liveness are shipped and tested. So is a set of optimizations that can each be
-                switched off individually, so their effect can be measured rather than assumed: strength reduction,
-                callee-saved borrowing, constant folding, dead code elimination, and loop rotation.
+                Register allocation and liveness are shipped and tested, along with the optimizer pipeline above. The ABI
+                work is the part that took two conventions rather than one: SysV is audited on every host, and the Win64
+                path exists behind <code>#if defined(_WIN32)</code> but has no test evidence yet, because the audit only ever
+                exercises whichever ABI the machine it runs on uses.
+              </p>
+              <p>
+                CPU feature detection is cross-checked against the kernel rather than trusted to CPUID, so the AVX and
+                AVX-512 gates cannot mis-detect on a host the CI machine is not. No AVX is emitted yet &mdash; that is Phase
+                III &mdash; but the gating and the VEX transition scanner are already in place underneath it.
+              </p>
+            </div>
+
+            <div class="doc-block reveal" id="verification">
+              <h3><span>07</span>How the claims get checked</h3>
+              <p>
+                Work outward and stop when you are satisfied. Each layer is roughly an order of magnitude slower than the one
+                above it, which is what makes running all of them reasonable rather than aspirational.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>the full gate</span></div>
+                <pre><span class="accent">$</span> ctest --test-dir build --output-on-failure        <span class="muted"># 28/28</span>
+<span class="accent">$</span> bash tools/verify_all.sh
+<span class="accent">$</span> python3 tools/run_regression.py                  <span class="muted"># 15/15 untyped</span>
+<span class="accent">$</span> python3 tools/run_typed_regression.py            <span class="muted"># 13/13 typed</span>
+<span class="accent">$</span> python3 tools/run_tier_diff.py                   <span class="muted"># 39/39 both tiers</span></pre>
+              </div>
+              <p>
+                <code>run_tier_diff.py</code> is the highest-value of those. It runs every program through both tiers and
+                requires byte-identical stdout, then reports which tier actually ran &mdash; so a green run cannot hide
+                &ldquo;everything silently fell back to the interpreter&rdquo;. That property is why
+                <code>--strict</code> exists as a flag rather than as a habit.
+              </p>
+              <div class="code-card">
+                <div class="code-card-bar"><i></i><span>layer 3 · per-shape differential fuzzing</span></div>
+                <pre><span class="accent">$</span> python3 tools/fuzz_diff.py --count 300             <span class="muted"># general</span>
+<span class="accent">$</span> python3 tools/fuzz_diff.py --count 300 --floats    <span class="muted"># int/float mixes</span>
+<span class="accent">$</span> python3 tools/fuzz_diff.py --count 300 --bitwise   <span class="muted"># &amp; | ^ &lt;&lt; &gt;&gt;, RCX hazard</span>
+<span class="accent">$</span> python3 tools/fuzz_diff.py --mod-negatives --count 300
+<span class="accent">$</span> python3 tools/fuzz_diff.py --phi --count 300        <span class="muted"># merges, with and without --ssa</span></pre>
+              </div>
+              <p>
+                Each mode exists because the general generator does not reach that shape &mdash; it annotates every variable
+                <code>int[64]</code> and so emits no <code>const_f64</code> at all. Four general modes ran for a long time
+                without approaching float code; the float mode then found a real miscompile, an
+                <code>Unknown</code>-kind operand lowered as integer arithmetic over a double&rsquo;s bit pattern.
+              </p>
+              <p>
+                The
+                <a href="roadmap/verification.html">verification page</a> covers the whole stack, including how to isolate
+                one optimization&rsquo;s effect, the two benchmark traps that fail quietly rather than loudly, and what a
+                green run still does not prove.
               </p>
             </div>
 
             <div class="doc-block reveal" id="limits">
-              <h3><span>05</span>Honest limits</h3>
+              <h3><span>08</span>Honest limits</h3>
               <p>
                 A green test run covers the subset above and should not be mistaken for a finished language. These are the
                 gaps as they stand today.
               </p>
               <dl class="spec-list">
-                <div class="spec-line"><dt>IR opcodes emitted</dt><dd><code>19 of 20</code></dd></div>
-                <div class="spec-line"><dt><code>Phi</code></dt><dd class="no">no emitter yet</dd></div>
+                <div class="spec-line"><dt>IR opcodes emitted</dt><dd><code>25 of 26</code></dd></div>
+                <div class="spec-line"><dt><code>Phi</code></dt><dd class="no">lowered, not emitted</dd></div>
                 <div class="spec-line"><dt>arguments per function / call</dt><dd class="no">capped at 2</dd></div>
-                <div class="spec-line"><dt>AOT binary emit</dt><dd class="no">none · everything runs in-process</dd></div>
+                <div class="spec-line"><dt>float merges</dt><dd class="no">never promoted &middot; needs an XMM pool</dd></div>
+                <div class="spec-line"><dt>Win64 ABI</dt><dd class="no">implemented, no test evidence yet</dd></div>
+                <div class="spec-line"><dt>AOT binary emit</dt><dd class="no">none &middot; everything runs in-process</dd></div>
                 <div class="spec-line"><dt>architectures</dt><dd class="no">x86-64 only</dd></div>
+                <div class="spec-line"><dt>AVX emitted</dt><dd class="no">none &middot; feature gating only</dd></div>
                 <div class="spec-line"><dt>diamond unrolling</dt><dd>opt-in via <code>--unroll-diamonds</code></dd></div>
               </dl>
               <p>
                 <code>Phi</code> is the single unemitted opcode, and it is what blocks <code>if</code>-as-expression
-                lowering once both arms have to merge without a stack round-trip. Lifting the two-argument cap is the other
-                blocker: most of the remaining test programs are waiting on it. Diamond unrolling is implemented,
-                correct, and fuzzed — but it measured slower on a branchy loop, so it stays behind a flag rather than
-                being deleted.
+                lowering once both arms have to merge without a memory round-trip. Its liveness prerequisite has already
+                landed in <code>compute_edge_uses()</code>; what is owed is value-kind inference for a float merge, an
+                allocator slot, and codegen for the join&rsquo;s parallel copies. Lifting the two-argument cap is the other
+                blocker: most of the remaining test programs are waiting on it. Diamond unrolling is implemented, correct,
+                and fuzzed &mdash; but it measured slower on a branchy loop, so it stays behind a flag rather than being
+                deleted.
               </p>
               <p>Everything below is how those claims get checked rather than taken on trust:</p>
               <div class="code-card">
                 <div class="code-card-bar"><i></i><span>verification</span></div>
                 <pre><span class="accent">$</span> ctest --test-dir build --output-on-failure
 <span class="accent">$</span> bash tools/verify_all.sh
-<span class="accent">$</span> python3 tools/run_typed_regression.py     <span class="muted"># 12/12</span>
-<span class="accent">$</span> python3 tools/run_tier_diff.py            <span class="muted"># 33/33</span>
+<span class="accent">$</span> python3 tools/run_typed_regression.py     <span class="muted"># 13/13</span>
+<span class="accent">$</span> python3 tools/run_tier_diff.py            <span class="muted"># 39/39</span>
 <span class="accent">$</span> python3 tools/fuzz_diff.py --count 300 --floats</pre>
               </div>
               <p>
                 <code>run_tier_diff.py</code> is the highest-value of those: it runs every program through both tiers and
-                requires byte-identical stdout, then reports which tier actually ran — so a pass cannot hide “everything
-                silently fell back to the interpreter”.
+                requires byte-identical stdout, then reports which tier actually ran &mdash; so a pass cannot hide
+                &ldquo;everything silently fell back to the interpreter&rdquo;.
+              </p>
+              <div class="note">
+                <strong>Opcode coverage is not operand coverage</strong>
+                <p>
+                  25 of 26 opcodes are emitted and each is exercised through <code>tier_runner --strict</code>, which proves
+                  the opcode really executed natively. It does not prove every operand shape is right &mdash;
+                  <code>gt</code> and <code>not</code> have a single native use each in the checked-in IR corpus.
+                  <code>Mod</code> is the standing example: the general fuzzer only emits finite constants, so it cannot
+                  generate <code>1.0 % inf</code>, which was returning NaN natively while the interpreter was correct. That
+                  case is pinned by an adversarial entry that <em>requires</em> the native tier, so a future guard change
+                  cannot quietly demote it and hide the bug.
+                </p>
+              </div>
+              <p>
+                The <a href="roadmap.html">roadmap</a> tracks what is next and which phase each item belongs to, and every
+                shipped entry there carries the test that enforces it.
               </p>
             </div>
           </div>

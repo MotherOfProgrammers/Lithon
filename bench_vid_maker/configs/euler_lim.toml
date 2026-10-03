@@ -1,0 +1,10 @@
+title = "Approximating e via the limit definition: CPython vs Lithon"
+subtitle = "nested loop to i=1,000 -- same program, run as-is in each engine"
+
+[[tasks]]
+name = "CPython"
+command = ["{python}", "bench_vid_maker/tasks/python_euler.py"]
+
+[[tasks]]
+name = "Lithon"
+command = ["{lithon}", "test_codes_lithon/test_eulars_constant_lim_def.py"]

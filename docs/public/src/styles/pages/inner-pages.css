@@ -76,8 +76,14 @@ main { padding-top: var(--header-height); }
 .info-tile strong { display: block; margin-bottom: 11px; font-size: 16px; letter-spacing: -0.04em; }
 .info-tile p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--ink-muted); }
 
-.tracker-head { display: flex; align-items: end; justify-content: space-between; margin-bottom: 45px; }
-.tracker-head p { max-width: 38ch; margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-muted); }
+.tracker-head { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 24px 40px; margin-bottom: 34px; }
+.tracker-head > div { flex: 1 1 300px; }
+.tracker-head > p { flex: 0 1 38ch; max-width: 38ch; margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-muted); }
+/* base.css sizes h2 for a page hero. As a section label it competes with the
+   h1 above it and reads as a second headline, so it drops to the scale of a
+   heading that introduces something rather than announces it. */
+.tracker-head h2 { margin: 0; font-size: clamp(21px, 1.9vw, 26px); letter-spacing: -0.025em; }
+.tracker-head .section-kicker { margin-bottom: 14px; }
 
 .case-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 13px; margin-top: 55px; }
 .case-card { min-height: 330px; padding: 28px; display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--surface); transition: transform 0.35s var(--ease), background 0.25s ease; }
@@ -117,26 +123,210 @@ main { padding-top: var(--header-height); }
 .use-card h3 { margin: 28px 0 10px; font-size: 17px; letter-spacing: -0.04em; }
 .use-card p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--ink-muted); }
 
-.progress-card { display: grid; grid-template-columns: 120px 1fr 120px; align-items: center; gap: 25px; margin-bottom: 52px; padding: 20px 24px; border: 1px solid var(--border); background: var(--lemon); color: var(--on-accent); }
-.progress-card strong { font: 30px var(--mono); letter-spacing: -0.04em; }
-.progress-card span { font: var(--text-micro)/1 var(--mono); text-transform: uppercase; color: var(--on-accent-muted); }
-.progress-track { height: 4px; background: color-mix(in srgb, var(--on-accent) 16%, transparent); }
-.progress-track i { display: block; width: 42%; height: 100%; background: var(--accent); }
+/* The three phases, in order. The sequence is the information here — it is a
+   dependency chain, not three parallel tracks — so it is drawn as one connected
+   run with the connectors carrying the direction, rather than as three equal
+   cards that would imply the phases are interchangeable. */
+.phase-map { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-bottom: 60px; border: 1px solid var(--border); background: var(--surface); }
+.phase-node { position: relative; padding: 24px 26px 26px; }
+.phase-node + .phase-node { border-left: 1px solid var(--border); }
+/* The connector is a real rule with an arrowhead, so "then" is drawn rather
+   than asserted. It is a pseudo-element on the node so it cannot be read as a
+   list bullet at any breakpoint. */
+.phase-node + .phase-node::before {
+  content: "";
+  position: absolute;
+  top: 38px;
+  left: -1px;
+  width: 1px;
+  height: 26px;
+  background: var(--border-strong);
+}
+.phase-node + .phase-node::after {
+  content: "";
+  position: absolute;
+  top: 63px;
+  left: -4px;
+  border: 4px solid transparent;
+  border-left-color: var(--border-strong);
+  border-right: 0;
+}
+.phase-flag { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font: var(--text-ui)/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
+.phase-flag i { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
+.phase-node[data-phase-state="active"] .phase-flag { color: var(--accent); }
+.phase-node[data-phase-state="active"] .phase-flag i { background: var(--accent); }
+.phase-node[data-phase-state="active"] { background: var(--lemon); color: var(--on-accent); }
+.phase-node[data-phase-state="active"] .phase-flag { color: var(--on-accent-muted); }
+.phase-node[data-phase-state="active"] h3, .phase-node[data-phase-state="active"] p { color: var(--on-accent); }
+.phase-node h3 { margin: 0 0 9px; font-size: 19px; line-height: 1.2; letter-spacing: -0.025em; }
+.phase-node p { margin: 0; font-size: 13px; line-height: 1.65; color: var(--ink-muted); }
+.phase-node a { display: inline-block; margin-top: 16px; font: var(--text-ui)/1.4 var(--mono); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.phase-node a:hover { color: var(--accent); }
 
-.roadmap-filter { display: flex; gap: 7px; margin-bottom: 30px; }
+/* Status travels with the milestone, so it is a chip on the row rather than a
+   marker glyph in the gutter: the word is what a reader scanning for "what is
+   still open" is actually looking for. */
+.roadmap-state { padding: 6px 9px; border: 1px solid var(--border-strong); font: var(--text-ui)/1.2 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); white-space: nowrap; }
+.roadmap-item[data-roadmap-status="done"] .roadmap-state { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+/* Lemon rather than the accent for the active chip: in dark themes the accent
+   is a pale peach, and ink-on-peach is a low-contrast pairing that reads as a
+   smudge. Lemon carries the same "this one is live" signal at both themes and
+   is a surface the palette already uses for accent content. */
+.roadmap-item[data-roadmap-status="active"] .roadmap-state { border-color: transparent; background: var(--lemon); color: var(--on-accent); }
+.roadmap-item[data-roadmap-status="later"] .roadmap-state { color: var(--ink-faint); }
+.roadmap-evidence { font: var(--text-ui)/1.5 var(--mono); color: var(--ink-muted); overflow-wrap: anywhere; }
+.roadmap-evidence::before { content: "evidence · "; color: var(--ink-faint); }
+
+/* Phases are accordion groups: one open at a time, because the reader is
+   usually asking "what is happening now" and Phase I is the answer. The phase
+   identity moves up into the group header, so it is stated once per phase
+   instead of twenty-two times down the page. */
+.roadmap-groups { border-top: 1px solid var(--border-strong); }
+.roadmap-group { border-bottom: 1px solid var(--border); }
+.roadmap-group-toggle {
+  display: grid;
+  grid-template-columns: 96px 1fr auto 24px;
+  align-items: center;
+  gap: 22px;
+  width: 100%;
+  padding: 22px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  transition: background 0.25s ease;
+}
+.roadmap-group-toggle:hover { background: var(--surface); }
+.roadmap-group-phase { font: var(--text-ui)/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+.roadmap-group-title { font-size: 19px; letter-spacing: -0.025em; }
+.roadmap-group-title em { color: var(--accent); font-style: normal; }
+.roadmap-group-state { font: var(--text-ui)/1.3 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); white-space: nowrap; }
+.roadmap-group[data-phase-state="active"] .roadmap-group-state { color: var(--accent); }
+.roadmap-group-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* A drawn chevron rather than a glyph, so it inherits stroke weight and colour
+   from the same place as the rest of the icon set. */
+.roadmap-chevron { width: 11px; height: 11px; justify-self: end; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-2px, -2px); transition: transform 0.3s var(--ease); }
+.roadmap-group-toggle[aria-expanded="true"] .roadmap-chevron { transform: rotate(225deg) translate(-2px, -2px); }
+.roadmap-group-body { padding: 4px 0 26px; }
+.roadmap-group-body[hidden] { display: none; }
+
+/* One row per milestone: marker, title, status. The prose lives in the dialog,
+   which is what lets twenty-two rows stay scannable instead of becoming a wall. */
+.roadmap-item {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border);
+}
+.roadmap-marker { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; }
+.roadmap-marker::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+.roadmap-item[data-roadmap-status="done"] .roadmap-marker { border-color: var(--ink); }
+.roadmap-item[data-roadmap-status="done"] .roadmap-marker::before { background: var(--ink); }
+.roadmap-item[data-roadmap-status="active"] .roadmap-marker { border-color: var(--ink); }
+.roadmap-item[data-roadmap-status="active"] .roadmap-marker::before { background: var(--accent); }
+.roadmap-item[data-roadmap-status="next"] .roadmap-marker::before { border: 1px solid var(--ink-faint); }
+.roadmap-item[data-roadmap-status="later"] .roadmap-marker { border-style: dashed; }
+.roadmap-item-title { margin: 0; font-size: 15px; font-weight: 500; letter-spacing: -0.015em; }
+.roadmap-item-open { display: inline-flex; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* The affordance is a rule under the title plus a drawn arrow, not a tinted
+   pill — twenty-two pills would turn the list back into a wall of colour. */
+.roadmap-item-open::after { content: ""; width: 9px; height: 9px; flex: none; border-top: 1.5px solid var(--ink-faint); border-right: 1.5px solid var(--ink-faint); transform: rotate(45deg); transition: transform 0.25s var(--ease), border-color 0.25s ease; }
+.roadmap-item-open:hover { color: var(--accent); }
+.roadmap-item-open:hover::after { border-color: var(--accent); transform: rotate(45deg) translate(2px, -2px); }
+.roadmap-item-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+/* The detail panel is the milestone's own copy, held in the row so it stays in
+   the document for search and for a reader without JavaScript. Hidden by
+   default rather than behind a `.js` gate: a gate that waits on a module load
+   shows twenty-two paragraphs the instant the module is slow, and never puts
+   them back. A <noscript> rule in the head reveals them instead. */
+.milestone-detail { display: none; grid-column: 2 / -1; margin: 4px 0 8px; padding-left: 16px; border-left: 1px solid var(--border-strong); }
+.milestone-detail p { max-width: 68ch; margin: 0 0 10px; font-size: 14px; line-height: 1.7; color: var(--ink-muted); }
+
+/* Detail overlay. Native <dialog> is used precisely so focus trapping, Escape,
+   and the inert background come from the platform rather than being rebuilt. */
+.milestone-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(78vh, 720px);
+  padding: 0;
+  border: 0;
+  background: var(--surface-solid);
+  color: var(--ink);
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.5);
+}
+.milestone-dialog::backdrop { background: rgba(28, 24, 34, 0.6); backdrop-filter: blur(3px); }
+.milestone-dialog-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 20px; border-bottom: 1px solid var(--border); }
+.milestone-dialog-scope { font: var(--text-ui)/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.milestone-dialog-close { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); background: transparent; color: var(--ink); }
+.milestone-dialog-close:hover { border-color: var(--border-strong); background: var(--surface); }
+.milestone-dialog-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* A drawn cross: two rules, so it matches the chevron's stroke rather than
+   borrowing a font's glyph weight. */
+.milestone-dialog-close::before, .milestone-dialog-close::after { content: ""; position: absolute; width: 13px; height: 1.5px; background: currentColor; }
+.milestone-dialog-close::before { transform: rotate(45deg); }
+.milestone-dialog-close::after { transform: rotate(-45deg); }
+.milestone-dialog-close { position: relative; }
+.milestone-dialog-body { padding: 24px 24px 28px; overflow-y: auto; max-height: calc(min(78vh, 720px) - 58px); }
+.milestone-dialog-body h3 { margin: 0 0 14px; font-size: 24px; line-height: 1.15; letter-spacing: -0.03em; }
+.milestone-dialog-body p { max-width: 62ch; margin: 0 0 13px; font-size: 15px; line-height: 1.72; color: var(--ink-muted); }
+.milestone-dialog-body .roadmap-state { display: inline-block; margin-bottom: 16px; }
+.milestone-dialog-body .roadmap-evidence { display: block; padding: 14px 16px; border: 1px solid var(--border); background: var(--surface); }
+
+.roadmap-filter { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 30px; }
 .roadmap-filter button { padding: 9px 12px; border: 1px solid var(--border); background: transparent; color: var(--ink); font: var(--text-ui)/1 var(--mono); }
 .roadmap-filter button:hover, .roadmap-filter button.is-selected { background: var(--ink); color: var(--paper); }
 
-.roadmap-list { position: relative; padding-left: 75px; }
-.roadmap-list::before { content: ""; position: absolute; top: 7px; bottom: 35px; left: 16px; border-left: 1px dashed var(--border-strong); }
-.roadmap-item { position: relative; display: grid; grid-template-columns: 125px 1fr; gap: 38px; padding-bottom: 56px; }
-.roadmap-marker { position: absolute; top: 0; left: -75px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--paper); font: var(--text-ui)/1 var(--mono); }
-.roadmap-item.is-done .roadmap-marker { background: var(--ink); color: var(--paper); }
-.roadmap-date { padding-top: 10px; color: var(--accent); font: var(--text-ui)/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
-.roadmap-item h3 { margin: 4px 0 11px; font-size: 26px; letter-spacing: -0.025em; }
-.roadmap-item p { max-width: 60ch; margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-muted); }
-.roadmap-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
-.roadmap-tags span { padding: 7px 9px; border: 1px solid var(--border); font: var(--text-micro)/1.3 var(--mono); color: var(--ink-muted); }
+/* The deep-dive index. Not a card grid: five rows of genuinely different
+   length beat five identical boxes, and the reader is scanning for topic, not
+   browsing a set. Each row carries its own scope so the reader knows which
+   phase a page belongs to before clicking. */
+.subpage-index { margin: 0; padding: 0; border-top: 1px solid var(--border-strong); list-style: none; }
+.subpage-row { border-bottom: 1px solid var(--border); }
+.subpage-row a { display: grid; grid-template-columns: 128px 1fr 22px; align-items: baseline; gap: 26px; padding: 24px 14px; transition: color 0.25s ease, background 0.25s ease; }
+.subpage-row a:hover { background: var(--surface); }
+.subpage-scope { font: var(--text-ui)/1.45 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+.subpage-text { display: block; }
+.subpage-text strong { display: block; margin-bottom: 6px; font-size: 18px; letter-spacing: -0.02em; }
+.subpage-text span { max-width: 68ch; font: 13px/1.65 var(--sans); color: var(--ink-muted); }
+.subpage-arrow { color: var(--accent); font: var(--text-ui)/1.45 var(--mono); text-align: right; }
+.subpage-row a:hover .subpage-arrow { transform: translateX(4px); }
+.subpage-arrow { transition: transform 0.3s var(--ease); }
+
+/* Where the claims live: a real table, because these rows are compared across
+   four columns and a definition list would force the reader to hold the row in
+   their head. Numerals are tabular so the figures line up on the decimal.
+   The frame belongs to the table rather than to the scroll container, so a
+   narrow viewport clips the table without inheriting a second border. */
+.data-wrap { margin: 26px 0 0; overflow-x: auto; }
+.data-table { width: 100%; border: 1px solid var(--border); border-collapse: collapse; font: var(--text-ui-lg)/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+.data-table caption { padding: 0 2px 11px; text-align: left; font: var(--text-ui)/1.5 var(--mono); color: var(--ink-muted); }
+.data-table th, .data-table td { padding: 13px 18px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.data-table thead th { border-bottom: 1px solid var(--border-strong); font-size: var(--text-ui); font-weight: 400; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); white-space: nowrap; }
+.data-table tbody tr:last-child th, .data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody th { font-weight: 400; color: var(--ink); }
+.data-table td { color: var(--ink-muted); }
+.data-table code { font: inherit; color: var(--accent); }
+.data-table .measure { color: var(--accent); white-space: nowrap; }
+.data-table .no { color: var(--ink-faint); }
+
+/* A side remark that has to survive being skimmed. It is a bordered surface
+   with a mono label rather than a coloured rule down one side, because the
+   accent already means "this is the current phase" everywhere else on the
+   page and a rule would spend that meaning a second time. */
+.note { margin: 26px 0; padding: 19px 22px; border: 1px solid var(--border-strong); background: var(--surface); }
+.note > strong { display: block; margin-bottom: 8px; font: var(--text-ui)/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.note p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-muted); }
+.note p + p { margin-top: 11px; }
+
+/* Sibling pages at the foot of a sub page. Two labelled slots rather than a
+   generic list, so the reader can tell whether there is somewhere to go next
+   or whether this is the last thing on the topic. */
+.subpage-nav { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; margin-top: 62px; padding-top: 34px; border-top: 1px solid var(--border); }
+.subpage-nav a { display: block; padding: 20px 22px; border: 1px solid var(--border); background: var(--surface); transition: transform 0.3s var(--ease), border-color 0.25s ease, background 0.25s ease; }
+.subpage-nav a:hover { transform: translateY(-4px); border-color: var(--border-strong); background: var(--surface-solid); }
+.subpage-nav span { display: block; margin-bottom: 7px; font: var(--text-ui)/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+.subpage-nav strong { font-size: 16px; letter-spacing: -0.02em; }
 
 .playground-wrap { padding: 76px 0 140px; }
 .playground-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -287,12 +477,26 @@ main { padding-top: var(--header-height); }
   .case-card--feature { grid-row: auto; }
   .tracker-head { display: block; }
   .tracker-head p { margin-top: 20px; }
-  .progress-card { grid-template-columns: 1fr 1fr; }
-  .progress-track { grid-column: span 2; order: 3; }
-  .roadmap-list { padding-left: 46px; }
-  .roadmap-list::before { left: 2px; }
+  /* Stacked, the phases stop being a chain and start being a list — so the
+     connector turns into a downward tick and the direction stays readable. */
+  .phase-map { grid-template-columns: 1fr; }
+  .phase-node + .phase-node { border-left: 0; border-top: 1px solid var(--border); }
+  .phase-node + .phase-node::before { top: -1px; left: 30px; width: 26px; height: 1px; }
+  .phase-node + .phase-node::after { top: -4px; left: 55px; border: 4px solid transparent; border-top-color: var(--border-strong); border-bottom: 0; }
+  .subpage-row a { grid-template-columns: 1fr 22px; gap: 4px 18px; }
+  .subpage-scope { grid-column: 1 / -1; }
+  .subpage-arrow { grid-row: 2; grid-column: 2; align-self: center; }
+  .subpage-nav { grid-template-columns: 1fr; }
+  .roadmap-group-toggle { grid-template-columns: 1fr 24px; gap: 5px 18px; padding: 20px 12px; }
+  .roadmap-group-phase { grid-column: 1; }
+  .roadmap-group-state { grid-column: 1; }
+  .roadmap-chevron { grid-row: 1 / span 3; grid-column: 2; align-self: center; }
+  .roadmap-item { grid-template-columns: 26px 1fr; gap: 5px 14px; padding: 12px; }
+  .roadmap-item .roadmap-state { grid-column: 2; justify-self: start; }
+  .milestone-detail { grid-column: 1 / -1; margin: 4px 0 8px; }
   .roadmap-marker { left: -60px; }
   .roadmap-item { grid-template-columns: 1fr; gap: 9px; }
+  .roadmap-item > div { grid-column: 1; }
   .playground-grid { grid-template-columns: 1fr; }
   .playground-toolbar { flex-direction: column; align-items: flex-start; gap: 15px; }
   .editor-panel, .output-panel { min-height: 420px; }
