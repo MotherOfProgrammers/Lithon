@@ -9,7 +9,7 @@
 //             nothing: no interpreter fallback ("slow paths never exist").
 //   --native  force the JIT with the guard OFF. Unsafe: for testing only.
 //
-// Linux/x86-64 only (uses mmap/mprotect).
+// x86-64 on POSIX and Windows (ExecutableBuffer hides mmap/VirtualAlloc).
 //
 // Which tier actually ran is reported on stderr as "[tier0]" (interpreter)
 // or "[tier1]" (native), so a test harness can compare stdout between
@@ -20,16 +20,14 @@
 //       src/jit/tier_runner.cpp src/ir/text_parser.cpp
 //       src/interpreter/interpreter.cpp src/typecheck/typecheck.cpp
 
-#include <sys/mman.h>
-
 #include <cstdio>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 
 #include "compile_function.h"
+#include "exec_memory.h"
 #include "interpreter/interpreter.h"
 #include "ir/text_parser.h"
 #include "print_guard.h"
@@ -74,22 +72,19 @@ bool run_native(const lithon::ir::Module& m, lithon::jit::CompileOptions options
         return false;
     }
 
-    void* mem = mmap(nullptr, compiled.code.size(), PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) { std::perror("mmap"); return false; }
-    std::memcpy(mem, compiled.code.data(), compiled.code.size());
-    if (mprotect(mem, compiled.code.size(), PROT_READ | PROT_EXEC) != 0) {
-        std::perror("mprotect");
-        munmap(mem, compiled.code.size());
+    lithon::jit::ExecutableBuffer exec_mem;
+    try {
+        exec_mem.load(compiled.code.data(), compiled.code.size());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[tier0] exec memory: %s\n", e.what());
         return false;
     }
 
     std::fputs("[tier1] native\n", stderr);
     using Fn = void (*)();
-    auto entry = reinterpret_cast<Fn>(static_cast<uint8_t*>(mem) + main_it->second);
+    auto entry = exec_mem.entry<Fn>(main_it->second);
     entry();
     std::fflush(stdout);   // native print() goes through libc stdio
-    munmap(mem, compiled.code.size());
     return true;
 }
 
