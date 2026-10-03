@@ -13,7 +13,14 @@ from rich.console import Console
 
 from .config import PROJECT_ROOT, load_config
 from .recorder import VideoRecorder
-from .ui import estimate_frame_height, run_with_ui
+from .ui import run_with_ui
+
+# Sized so the default rendered frame lands comfortably in 2K+ territory
+# with the (larger, more legible) default font_size -- see VideoRecorder's
+# cell metrics for how width_chars/height_chars/font_size turn into pixels.
+DEFAULT_VIDEO_COLS = 234
+DEFAULT_VIDEO_ROWS = 56
+DEFAULT_FONT_SIZE = 34
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,10 +41,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--video-only", action="store_true", help="render --video without opening a live terminal UI")
     ap.add_argument("--fps", type=int, default=20, help="video frame rate (default: 20)")
-    ap.add_argument("--video-cols", type=int, default=150, help="video width in character cells")
+    ap.add_argument(
+        "--video-cols", type=int, default=DEFAULT_VIDEO_COLS,
+        help=f"video width in character cells (default: {DEFAULT_VIDEO_COLS}, ~2K-class)",
+    )
     ap.add_argument(
         "--video-rows", type=int, default=None,
-        help="video height in character cells (default: auto-fit to content)",
+        help=f"video height in character cells (default: {DEFAULT_VIDEO_ROWS}, ~2K-class)",
+    )
+    ap.add_argument(
+        "--cores", type=int, default=None,
+        help="pin every task's process to this many CPU cores (overrides the config's 'cores', if any)",
+    )
+    ap.add_argument(
+        "--no-music", action="store_true",
+        help="don't mux the procedurally-generated (non-copyright) background music into the video",
     )
     args = ap.parse_args(argv)
 
@@ -46,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, ValueError) as e:
         print(f"bench-vid-maker: {e}", file=sys.stderr)
         return 2
+    if args.cores is not None:
+        cfg = dataclasses.replace(cfg, cores=args.cores)
 
     recorder = None
     if args.video is not None or args.video_only:
@@ -53,19 +73,24 @@ def main(argv: list[str] | None = None) -> int:
         if video_path is None:
             stamp = time.strftime("%Y%m%d-%H%M%S")
             video_path = PROJECT_ROOT / "results" / f"{cfg.path.stem}_{stamp}.mp4"
-        video_rows = args.video_rows or estimate_frame_height(cfg, width_chars=args.video_cols)
+        video_rows = args.video_rows or DEFAULT_VIDEO_ROWS
         try:
             recorder = VideoRecorder(
-                video_path, width_chars=args.video_cols, height_chars=video_rows, fps=args.fps
+                video_path, width_chars=args.video_cols, height_chars=video_rows, fps=args.fps,
+                font_size=DEFAULT_FONT_SIZE, music=not args.no_music,
             )
         except FileNotFoundError as e:
             print(f"bench-vid-maker: {e}", file=sys.stderr)
             return 2
     else:
-        video_rows = args.video_rows or 42
+        video_rows = args.video_rows or DEFAULT_VIDEO_ROWS
 
     console = (
-        Console(file=open(os.devnull, "w"), width=args.video_cols, height=video_rows)
+        Console(
+            file=open(os.devnull, "w", encoding="utf-8", errors="replace"),
+            width=args.video_cols,
+            height=video_rows,
+        )
         if args.video_only
         else None
     )

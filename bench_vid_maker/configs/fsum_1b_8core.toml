@@ -1,0 +1,11 @@
+title = "Summing 1,000,000,000 integers: CPython vs Lithon"
+subtitle = "pinned to 8 CPU cores"
+cores = 8
+
+[[tasks]]
+name = "CPython"
+command = ["{python}", "bench_vid_maker/tasks/python_sum.py"]
+
+[[tasks]]
+name = "Lithon"
+command = ["{lithon}", "test_codes_lithon/test_1b_fsum.py"]

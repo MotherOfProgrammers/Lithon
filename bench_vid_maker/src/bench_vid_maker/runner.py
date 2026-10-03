@@ -43,22 +43,31 @@ class TaskResult:
         return self.cpu_user + self.cpu_system
 
 
-def run_task(task: Task, on_tick: Callable[[Tick], None] | None = None) -> TaskResult:
+def run_task(
+    task: Task, on_tick: Callable[[Tick], None] | None = None, cores: int | None = None
+) -> TaskResult:
     """Spawn `task`, polling at TICK_SECONDS so `on_tick(Tick)` can drive a
     live display. `elapsed` is wall-clock from process spawn to process exit
     (what a viewer watching a timer on screen would see); CPU figures come
     from the OS's own process accounting (psutil), sampled at the same
     cadence -- polling only affects UI smoothness, never the recorded
-    values."""
+    values. If `cores` is given, the child process's CPU affinity is pinned
+    to that many cores (best-effort; silently ignored where unsupported)."""
     start = time.perf_counter()
     proc = subprocess.Popen(
         task.command, cwd=task.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     try:
         ps_proc: psutil.Process | None = psutil.Process(proc.pid)
-        ps_proc.cpu_percent(interval=None)  # prime the internal sampler
     except psutil.Error:
         ps_proc = None
+
+    if ps_proc is not None and cores is not None:
+        try:
+            available = list(range(psutil.cpu_count(logical=True) or cores))
+            ps_proc.cpu_affinity(available[: max(1, cores)])
+        except (psutil.Error, NotImplementedError):
+            pass  # affinity pinning best-effort only (e.g. unsupported on this OS/process)
 
     cpu_user = cpu_system = cpu_percent = 0.0
 
@@ -69,9 +78,15 @@ def run_task(task: Task, on_tick: Callable[[Tick], None] | None = None) -> TaskR
         try:
             times = ps_proc.cpu_times()
             cpu_user, cpu_system = times.user, times.system
-            cpu_percent = ps_proc.cpu_percent(interval=None)
         except psutil.Error:
             pass
+        # cpu_percent as an average over elapsed wall time, derived from the
+        # same OS-reported cumulative counters as cpu_user/cpu_system above --
+        # not psutil's own interval-based cpu_percent(), which on Windows is
+        # quantized to the ~15.6ms system clock tick and reads noisy/zero
+        # over the short (TICK_SECONDS) windows polled here.
+        elapsed_now = time.perf_counter() - start
+        cpu_percent = (cpu_user + cpu_system) / elapsed_now * 100 if elapsed_now > 0 else 0.0
 
     stdout = stderr = ""
     try:

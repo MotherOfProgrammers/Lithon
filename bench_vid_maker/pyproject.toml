@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 bench-vid-maker = "bench_vid_maker.cli:main"
+bench-vid-maker-all = "bench_vid_maker.batch:main"
 
 [build-system]
 requires = ["hatchling"]

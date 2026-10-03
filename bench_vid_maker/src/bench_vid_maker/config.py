@@ -4,6 +4,7 @@ Config shape::
 
     title = "1,000,000,000-iteration sum: CPython vs Lithon"
     subtitle = "optional, shown under the title"            # optional
+    cores = 4                                                # optional: pin every task to N CPU cores
 
     [[tasks]]
     name = "CPython"
@@ -71,6 +72,7 @@ class BenchConfig:
     subtitle: str | None
     tasks: list[Task]
     path: pathlib.Path
+    cores: int | None = None  # pin every task to this many CPU cores (affinity); None = unrestricted
 
 
 def _expand(token: str) -> str:
@@ -102,4 +104,5 @@ def load_config(path: pathlib.Path) -> BenchConfig:
         subtitle=data.get("subtitle"),
         tasks=tasks,
         path=path,
+        cores=data.get("cores"),
     )
